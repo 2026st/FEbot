@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from febot import web_search as ws
 from febot.config import Settings
 from febot.quiz import QuizItem, load_quiz_items, normalize_answer, pick_random
 from febot.rag import RagEngine
@@ -65,6 +68,60 @@ def _format_quiz(q: QuizItem) -> str:
     )
 
 
+def _make_cache_filename(question: str) -> str:
+    date = datetime.date.today().isoformat()
+    slug = re.sub(r"[^\w\u3040-\u30ff\u4e00-\u9fff]", "_", question[:40]).strip("_")
+    return f"web_cache_{date}_{slug}.md"
+
+
+def _handle_rag_question(
+    rag: RagEngine,
+    settings: Settings,
+    text: str,
+    user_id: str,
+    say,
+    thread_ts: str | None = None,
+) -> None:
+    """RAG → Web search fallback → corpus save → reply."""
+    kwargs = {"thread_ts": thread_ts} if thread_ts else {}
+
+    try:
+        out = rag.answer(user_id, text)
+    except Exception as e:
+        log.exception("rag failed: %s", e)
+        say("処理中にエラーが発生しました。管理者に連絡してください。", **kwargs)
+        return
+
+    if out is not None:
+        say(out.text, **kwargs)
+        return
+
+    # No knowledge in corpus → web search fallback
+    say("ナレッジベースに情報が見つかりませんでした。Webを検索中です...", **kwargs)
+    max_results = int(os.environ.get("WEB_SEARCH_MAX_RESULTS", "5"))
+    results = ws.search(text, max_results=max_results)
+    if not results:
+        say("Web検索でも情報が見つかりませんでした。別のキーワードでお試しください。", **kwargs)
+        return
+
+    try:
+        slack_text, corpus_md = ws.build_answer(rag._oai, settings.ai_chat_model, text, results)
+    except Exception as e:
+        log.exception("web answer build failed: %s", e)
+        say("Web検索結果の要約中にエラーが発生しました。", **kwargs)
+        return
+
+    try:
+        rag.add_to_corpus(corpus_md, _make_cache_filename(text))
+    except Exception as e:
+        log.warning("corpus save failed (non-fatal): %s", e)
+
+    say(
+        slack_text + "\n\n_（Web検索より取得。次回からはナレッジベースで回答します）_",
+        **kwargs,
+    )
+
+
 def create_app(settings: Settings) -> tuple[App, BotState]:
     rag: RagEngine | None = RagEngine(settings) if settings.rag_enabled() else None
     state = BotState(quiz_items=load_quiz_items(settings.corpus_dir))
@@ -95,14 +152,10 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if rag is None:
             say(NO_AI_REPLY, thread_ts=event.get("thread_ts", event["ts"]))
             return
-        user = event.get("user", "")
-        try:
-            out = rag.answer(user, text)
-        except Exception as e:
-            logger.exception("rag failed: %s", e)
-            say("処理中にエラーが発生しました。管理者に連絡してください。", thread_ts=event.get("thread_ts", event["ts"]))
-            return
-        say(out.text, thread_ts=event.get("thread_ts", event["ts"]))
+        _handle_rag_question(
+            rag, settings, text, event.get("user", ""), say,
+            thread_ts=event.get("thread_ts", event["ts"]),
+        )
 
     @app.event("message")
     def on_message(event, say, logger):
@@ -152,13 +205,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if rag is None:
             say(NO_AI_REPLY)
             return
-        try:
-            out = rag.answer(user, text)
-        except Exception as e:
-            logger.exception("rag failed: %s", e)
-            say("処理中にエラーが発生しました。管理者に連絡してください。")
-            return
-        say(out.text)
+        _handle_rag_question(rag, settings, text, user, say)
 
     return app, state
 

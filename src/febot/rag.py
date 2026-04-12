@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import time
@@ -17,6 +18,9 @@ from febot.config import Settings
 COLLECTION = "febot_corpus"
 GLOSSARY_FILE = "glossary.md"
 
+CHUNK_SIZE = 900
+CHUNK_OVERLAP = 120
+
 SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
 与えられた【参照抜粋】のみを根拠に、簡潔に日本語で答えてください。
 参照抜粋に質問への答えが含まれない場合は推測せず、「この質問に答える記述は参照抜粋にありません」と述べてください。
@@ -29,6 +33,31 @@ SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支�
 class RagAnswer:
     text: str
     sources: list[str]
+
+
+def _chunk_text(text: str, source: str) -> list[tuple[str, dict[str, str]]]:
+    """Chunk text into overlapping segments. Same logic as scripts/ingest.py."""
+    text = text.replace("\r\n", "\n").strip()
+    if not text:
+        return []
+    chunks: list[tuple[str, dict[str, str]]] = []
+    start = 0
+    n = len(text)
+    while start < n:
+        end = min(start + CHUNK_SIZE, n)
+        piece = text[start:end]
+        if end < n:
+            cut = piece.rfind("\n\n")
+            if cut > CHUNK_SIZE // 2:
+                piece = piece[:cut]
+                end = start + cut
+        piece = piece.strip()
+        if piece:
+            chunks.append((piece, {"source": source}))
+        if end >= n:
+            break
+        start = max(end - CHUNK_OVERLAP, start + 1)
+    return chunks
 
 
 def _load_glossary_sections(corpus_dir: Path) -> list[tuple[str, str]]:
@@ -131,7 +160,8 @@ class RagEngine:
         self.limiter = RateLimiter(settings.rate_limit_per_minute)
         self._glossary_sections = _load_glossary_sections(settings.corpus_dir)
 
-    def answer(self, user_id: str, question: str) -> RagAnswer:
+    def answer(self, user_id: str, question: str) -> RagAnswer | None:
+        """Answer from corpus. Returns None if no relevant knowledge found (triggers web search fallback)."""
         if not self.limiter.allow(user_id):
             return RagAnswer(
                 text="利用が集中しています。1分ほど待ってから再度お試しください。",
@@ -173,10 +203,15 @@ class RagEngine:
             if len(picked) >= self._settings.rag_top_k:
                 break
 
+        gloss_excerpts = _glossary_boost(question, self._glossary_sections)
+
+        # No knowledge found: neither vector results nor glossary match passed threshold
+        if not picked and not gloss_excerpts:
+            return None
+
         parts: list[str] = []
         source_names: list[str] = []
 
-        gloss_excerpts = _glossary_boost(question, self._glossary_sections)
         for i, gex in enumerate(gloss_excerpts):
             label = f"{GLOSSARY_FILE}（用語マッチ）"
             parts.append(f"### {label}\n{gex}")
@@ -206,3 +241,29 @@ class RagEngine:
         )
         text = (chat.choices[0].message.content or "").strip()
         return RagAnswer(text=text, sources=source_names)
+
+    def add_to_corpus(self, content: str, source_name: str) -> None:
+        """Chunk, embed, and upsert into Chroma. Also saves file to corpus dir."""
+        file_path = self._settings.corpus_dir / source_name
+        file_path.write_text(content, encoding="utf-8")
+
+        chunks = _chunk_text(content, source_name)
+        if not chunks:
+            return
+
+        texts = [c[0] for c in chunks]
+        metas = [c[1] for c in chunks]
+
+        resp = self._oai.embeddings.create(
+            model=self._settings.ai_embedding_model,
+            input=texts,
+        )
+        embeddings = [e.embedding for e in sorted(resp.data, key=lambda x: x.index)]
+
+        ids = []
+        for i, (text, meta) in enumerate(zip(texts, metas)):
+            src = meta["source"]
+            h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
+            ids.append(f"{src}_{i}_{h}")
+        # Use upsert so repeated identical questions don't cause duplicate-ID errors
+        self._collection.upsert(ids=ids, documents=texts, metadatas=metas, embeddings=embeddings)

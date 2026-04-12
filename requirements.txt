@@ -5,3 +5,4 @@ openai>=1.40.0
 python-dotenv>=1.0.0
 pypdf>=5.0.0
 PyYAML>=6.0.0
+duckduckgo-search>=6.2.0
