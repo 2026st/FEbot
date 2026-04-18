@@ -101,11 +101,16 @@ def _handle_rag_question(
     max_results = int(os.environ.get("WEB_SEARCH_MAX_RESULTS", "5"))
     results = ws.search(text, max_results=max_results)
     if not results:
-        say("Web検索でも情報が見つかりませんでした。別のキーワードでお試しください。", **kwargs)
+        say(
+            "Web検索でも情報が見つかりませんでした。別のキーワードでお試しください。",
+            **kwargs,
+        )
         return
 
     try:
-        slack_text, corpus_md = ws.build_answer(rag._oai, settings.ai_chat_model, text, results)
+        slack_text, corpus_md = ws.build_answer(
+            rag._oai, settings.ai_chat_model, text, results
+        )
     except Exception as e:
         log.exception("web answer build failed: %s", e)
         say("Web検索結果の要約中にエラーが発生しました。", **kwargs)
@@ -137,14 +142,22 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
     def on_mention(event, say, logger):
         text = _strip_mentions(event.get("text", ""))
         if not text:
-            say("メッセージを入力してください。", thread_ts=event.get("thread_ts", event["ts"]))
+            say(
+                "メッセージを入力してください。",
+                thread_ts=event.get("thread_ts", event["ts"]),
+            )
             return
         if _wants_quiz(text):
             item = pick_random(state.quiz_items)
             if not item:
-                say("練習問題データが見つかりません。", thread_ts=event.get("thread_ts", event["ts"]))
+                say(
+                    "練習問題データが見つかりません。",
+                    thread_ts=event.get("thread_ts", event["ts"]),
+                )
                 return
-            resp = say(_format_quiz(item), thread_ts=event.get("thread_ts", event["ts"]))
+            resp = say(
+                _format_quiz(item), thread_ts=event.get("thread_ts", event["ts"])
+            )
             ts = resp.get("ts")
             if ts:
                 state.pending_quiz[ts] = item
@@ -153,7 +166,11 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             say(NO_AI_REPLY, thread_ts=event.get("thread_ts", event["ts"]))
             return
         _handle_rag_question(
-            rag, settings, text, event.get("user", ""), say,
+            rag,
+            settings,
+            text,
+            event.get("user", ""),
+            say,
             thread_ts=event.get("thread_ts", event["ts"]),
         )
 
@@ -219,7 +236,9 @@ def run() -> None:
     settings = Settings.load()
     if settings.rag_enabled():
         try:
-            chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(COLLECTION)
+            chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(
+                COLLECTION
+            )
         except Exception as e:
             log.error(
                 "Chroma collection %r not found under %s. Run: python scripts/ingest.py (%s)",

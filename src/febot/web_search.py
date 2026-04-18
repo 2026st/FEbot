@@ -26,7 +26,9 @@ def search(query: str, max_results: int = 5) -> list[dict]:
         return []
 
 
-def build_answer(oai: OpenAI, model: str, question: str, results: list[dict]) -> tuple[str, str]:
+def build_answer(
+    oai: OpenAI, model: str, question: str, results: list[dict]
+) -> tuple[str, str]:
     """Generate answer from web results using LLM.
 
     Returns:

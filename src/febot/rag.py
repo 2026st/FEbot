@@ -96,14 +96,18 @@ def _section_matches_tokens(section_text: str, tokens: set[str]) -> bool:
             if len(tok) >= 3:
                 if tok in st:
                     return True
-            elif re.search(r"(?<![a-z0-9+./-])" + re.escape(tok) + r"(?![a-z0-9+./-])", st):
+            elif re.search(
+                r"(?<![a-z0-9+./-])" + re.escape(tok) + r"(?![a-z0-9+./-])", st
+            ):
                 return True
         elif tok in section_text:
             return True
     return False
 
 
-def _glossary_boost(question: str, sections: list[tuple[str, str]], *, max_sections: int = 2) -> list[str]:
+def _glossary_boost(
+    question: str, sections: list[tuple[str, str]], *, max_sections: int = 2
+) -> list[str]:
     if not sections:
         return []
     tokens = _question_tokens(question)
@@ -195,7 +199,9 @@ class RagEngine:
         max_d = _rag_max_distance()
         use_dist = max_d is not None and len(dists) == len(docs)
         picked: list[tuple[str, str, dict]] = []
-        for doc, meta, dist in zip(docs, metas, dists if use_dist else [0.0] * len(docs)):
+        for doc, meta, dist in zip(
+            docs, metas, dists if use_dist else [0.0] * len(docs)
+        ):
             if use_dist and dist > max_d:
                 continue
             src = (meta or {}).get("source") or "unknown"
@@ -218,7 +224,11 @@ class RagEngine:
             if label not in source_names:
                 source_names.append(label)
 
-        vec_cap = self._settings.rag_top_k if not gloss_excerpts else max(1, min(4, self._settings.rag_top_k))
+        vec_cap = (
+            self._settings.rag_top_k
+            if not gloss_excerpts
+            else max(1, min(4, self._settings.rag_top_k))
+        )
         for doc, src, _meta in picked[:vec_cap]:
             excerpt = doc.strip() if doc else ""
             if len(excerpt) > 700:
@@ -269,4 +279,6 @@ class RagEngine:
             h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
             ids.append(f"{src}_{i}_{h}")
         # Use upsert so repeated identical questions don't cause duplicate-ID errors
-        self._collection.upsert(ids=ids, documents=texts, metadatas=metas, embeddings=embeddings)
+        self._collection.upsert(
+            ids=ids, documents=texts, metadatas=metas, embeddings=embeddings
+        )

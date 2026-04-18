@@ -32,7 +32,9 @@ def parse_quiz_file(path: Path) -> list[QuizItem]:
             continue
         qid = m_id.group(1).strip()
         qtype = m_type.group(1).strip() if m_type else ""
-        body_match = re.search(r"##\s*問[^\n]*\n+(.*?)(?=\*\*ア\*\*|\Z)", block, re.DOTALL)
+        body_match = re.search(
+            r"##\s*問[^\n]*\n+(.*?)(?=\*\*ア\*\*|\Z)", block, re.DOTALL
+        )
         choices_match = re.search(r"(\*\*ア\*\*[\s\S]*?)(?=\*\*正解\*\*)", block)
         correct_match = re.search(r"\*\*正解\*\*:\s*([アイウエ])", block)
         expl_match = re.search(r"\*\*解説\*\*:\s*([\s\S]+?)(?=\n---|\Z)", block)

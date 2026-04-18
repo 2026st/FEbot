@@ -43,8 +43,12 @@ class Settings:
                 raise RuntimeError("SLACK_APP_TOKEN is required for Socket Mode")
 
         base = os.environ.get("AI_BASE_URL", "").strip() or None
-        chroma = Path(os.environ.get("CHROMA_PATH", str(root / "data" / "chroma"))).resolve()
-        corpus = Path(os.environ.get("CORPUS_DIR", str(root / "data" / "corpus"))).resolve()
+        chroma = Path(
+            os.environ.get("CHROMA_PATH", str(root / "data" / "chroma"))
+        ).resolve()
+        corpus = Path(
+            os.environ.get("CORPUS_DIR", str(root / "data" / "corpus"))
+        ).resolve()
 
         return Settings(
             slack_token=slack_token,
@@ -52,7 +56,9 @@ class Settings:
             ai_api_key=ai_key,
             ai_base_url=base,
             ai_chat_model=os.environ.get("AI_CHAT_MODEL", "gpt-4o-mini").strip(),
-            ai_embedding_model=os.environ.get("AI_EMBEDDING_MODEL", "text-embedding-3-small").strip(),
+            ai_embedding_model=os.environ.get(
+                "AI_EMBEDDING_MODEL", "text-embedding-3-small"
+            ).strip(),
             chroma_path=chroma,
             corpus_dir=corpus,
             rag_top_k=int(os.environ.get("RAG_TOP_K", "5")),
