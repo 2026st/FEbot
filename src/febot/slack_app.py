@@ -108,9 +108,7 @@ def _handle_rag_question(
         return
 
     try:
-        slack_text, corpus_md = ws.build_answer(
-            rag._oai, settings.ai_chat_model, text, results
-        )
+        slack_text, corpus_md = ws.build_answer(rag._oai, settings.ai_chat_model, text, results)
     except Exception as e:
         log.exception("web answer build failed: %s", e)
         say("Web検索結果の要約中にエラーが発生しました。", **kwargs)
@@ -155,9 +153,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
                     thread_ts=event.get("thread_ts", event["ts"]),
                 )
                 return
-            resp = say(
-                _format_quiz(item), thread_ts=event.get("thread_ts", event["ts"])
-            )
+            resp = say(_format_quiz(item), thread_ts=event.get("thread_ts", event["ts"]))
             ts = resp.get("ts")
             if ts:
                 state.pending_quiz[ts] = item
@@ -236,9 +232,7 @@ def run() -> None:
     settings = Settings.load()
     if settings.rag_enabled():
         try:
-            chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(
-                COLLECTION
-            )
+            chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(COLLECTION)
         except Exception as e:
             log.error(
                 "Chroma collection %r not found under %s. Run: python scripts/ingest.py (%s)",

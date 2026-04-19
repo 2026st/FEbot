@@ -96,9 +96,7 @@ def _section_matches_tokens(section_text: str, tokens: set[str]) -> bool:
             if len(tok) >= 3:
                 if tok in st:
                     return True
-            elif re.search(
-                r"(?<![a-z0-9+./-])" + re.escape(tok) + r"(?![a-z0-9+./-])", st
-            ):
+            elif re.search(r"(?<![a-z0-9+./-])" + re.escape(tok) + r"(?![a-z0-9+./-])", st):
                 return True
         elif tok in section_text:
             return True
@@ -200,7 +198,10 @@ class RagEngine:
         use_dist = max_d is not None and len(dists) == len(docs)
         picked: list[tuple[str, str, dict]] = []
         for doc, meta, dist in zip(
-            docs, metas, dists if use_dist else [0.0] * len(docs)
+            docs,
+            metas,
+            dists if use_dist else [0.0] * len(docs),
+            strict=True,
         ):
             if use_dist and dist > max_d:
                 continue
@@ -218,7 +219,7 @@ class RagEngine:
         parts: list[str] = []
         source_names: list[str] = []
 
-        for i, gex in enumerate(gloss_excerpts):
+        for gex in gloss_excerpts:
             label = f"{GLOSSARY_FILE}（用語マッチ）"
             parts.append(f"### {label}\n{gex}")
             if label not in source_names:
@@ -274,11 +275,9 @@ class RagEngine:
         embeddings = [e.embedding for e in sorted(resp.data, key=lambda x: x.index)]
 
         ids = []
-        for i, (text, meta) in enumerate(zip(texts, metas)):
+        for i, (text, meta) in enumerate(zip(texts, metas, strict=True)):
             src = meta["source"]
             h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
             ids.append(f"{src}_{i}_{h}")
         # Use upsert so repeated identical questions don't cause duplicate-ID errors
-        self._collection.upsert(
-            ids=ids, documents=texts, metadatas=metas, embeddings=embeddings
-        )
+        self._collection.upsert(ids=ids, documents=texts, metadatas=metas, embeddings=embeddings)

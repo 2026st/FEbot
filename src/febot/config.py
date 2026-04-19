@@ -43,12 +43,8 @@ class Settings:
                 raise RuntimeError("SLACK_APP_TOKEN is required for Socket Mode")
 
         base = os.environ.get("AI_BASE_URL", "").strip() or None
-        chroma = Path(
-            os.environ.get("CHROMA_PATH", str(root / "data" / "chroma"))
-        ).resolve()
-        corpus = Path(
-            os.environ.get("CORPUS_DIR", str(root / "data" / "corpus"))
-        ).resolve()
+        chroma = Path(os.environ.get("CHROMA_PATH", str(root / "data" / "chroma"))).resolve()
+        corpus = Path(os.environ.get("CORPUS_DIR", str(root / "data" / "corpus"))).resolve()
 
         return Settings(
             slack_token=slack_token,

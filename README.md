@@ -27,7 +27,7 @@
 
 ## システム構成・技術スタック
 
-- **言語**: Python 3.9 以上（`pyproject.toml` の `requires-python` に準拠）
+- **言語**: Python 3.10 以上（`pyproject.toml` の `requires-python` に準拠。`X | Y` 型表記のため 3.9 非対応）
 - **Slack**: [slack-bolt](https://slack.dev/bolt-python/)（**Socket Mode**）
 - **ベクトルDB**: Chroma（ローカル永続、`CHROMA_PATH`）
 - **LLM / 埋め込み**: **OpenAI 互換 API**（`openai` クライアント）。`AI_API_KEY` と任意の `AI_BASE_URL`（Azure 等）
@@ -106,13 +106,37 @@
    python3 -m febot
    ```
 
-## CI（Formatter）を通す手順
+## PR 前の手順（チーム向け）
 
-CI では `ruff format --check src/` と `ruff check src/` を実行しているため、PR 前に次を実行する。
+Pull Request を出す前に、メンバー各自が次まで行う。
+
+1. **`main` を前提にする**  
+   作業開始前に `main` を取り込み、`main`（またはチーム決めの既定ブランチ）から作業用ブランチを切る。レビュー依頼時点でもベースとの差分が読みやすいように、不要なマージコミットや無関係な変更を混ぜない。
+
+2. **秘密情報をリポジトリに載せない**  
+   `.env` はコミットしない（`.gitignore` 済みであることを確認する）。パスワードや API キーをソースに直接書かず、環境変数や既存の設定ロード経由に統一する。
+
+3. **CI と同じ品質チェックをローカルで通す**  
+   次の「CI（品質ゲート）を通す手順」のコマンドがすべて成功した状態で PR を出す。失敗しているチェックはレビュー対象にしない。
+
+4. **セルフレビューする**  
+   `git diff` で自分の変更を読み直し、デバッグ用の `print`、コメントアウトの残骸、意図しないファイル追加がないか確認する。
+
+5. **PR 本文を書く**  
+   変更の目的と概要、動作確認で実施したこと（例: ボット起動、該当コマンド実行）、レビュアーへ伝えたい注意があれば記載する。仕様議論が必要ならドラフト PR にするか、本文で明示する。
+
+## CI（品質ゲート）を通す手順
+
+PR がマージ可能になるには、GitHub Actions（`.github/workflows/ci-cd.yml`）と同じ基準をローカルでも満たすことが前提となる。
+
+- `ruff check` / `ruff format --check` 対象: `src/`、`scripts/`、`tests/`
+- `pytest`（複数 Python バージョンはワークフロー参照）
 
 ```bash
-python3 -m ruff format src/
-python3 -m ruff check src/
+python3 -m pip install -e ".[dev]"
+python3 -m ruff format src/ scripts/ tests/
+python3 -m ruff check src/ scripts/ tests/
+python3 -m pytest
 ```
 
 ## 実行時の挙動（要約）

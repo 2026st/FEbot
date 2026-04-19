@@ -55,7 +55,9 @@ def _extract_text(pdf_path: Path) -> str:
     return "".join(parts).strip()
 
 
-def _header(*, title: str, pdf_url: str, source_page: str, faq_url: str, past_top: str, generated_at: str) -> str:
+def _header(
+    *, title: str, pdf_url: str, source_page: str, faq_url: str, past_top: str, generated_at: str
+) -> str:
     return f"""# {title}
 
 > 本ファイルは IPA が公表した PDF から **機械的に抽出したテキスト** です。レイアウト・図表・数式は欠落や順序崩れがある場合があります。試験の正式な内容・解答・採点の解釈は **必ず公式 PDF** で確認してください。

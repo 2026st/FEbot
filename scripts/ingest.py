@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import sys
 from pathlib import Path
@@ -78,14 +79,12 @@ def main() -> None:
 
     settings.chroma_path.parent.mkdir(parents=True, exist_ok=True)
     chroma = chromadb.PersistentClient(path=str(settings.chroma_path))
-    try:
+    with contextlib.suppress(Exception):
         chroma.delete_collection(COLLECTION)
-    except Exception:
-        pass
     coll = chroma.get_or_create_collection(name=COLLECTION, metadata={"hnsw:space": "cosine"})
 
     ids = []
-    for i, (doc, meta) in enumerate(zip(texts, metas)):
+    for i, (doc, meta) in enumerate(zip(texts, metas, strict=True)):
         h = hashlib.sha256(f"{meta['source']}:{i}:{doc[:80]}".encode()).hexdigest()[:24]
         ids.append(f"{meta['source']}_{i}_{h}")
 
