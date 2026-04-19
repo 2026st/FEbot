@@ -1,4 +1,4 @@
-"""Retrieve from Chroma and answer with OpenAI-compatible chat API."""
+"""Retrieve from Chroma/Supabase and answer with OpenAI-compatible chat API."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import chromadb
 from openai import OpenAI
 
 from febot.config import Settings
+from febot.supabase_storage import SupabaseStorage
 
 COLLECTION = "febot_corpus"
 GLOSSARY_FILE = "glossary.md"
@@ -157,8 +158,17 @@ class RagEngine:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._oai = OpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
-        self._chroma = chromadb.PersistentClient(path=str(settings.chroma_path))
-        self._collection = self._chroma.get_collection(COLLECTION)
+
+        # Use Supabase if configured, otherwise fall back to Chroma
+        if settings.use_supabase:
+            self._storage = SupabaseStorage(settings.supabase_url, settings.supabase_key)
+            self._chroma = None
+            self._collection = None
+        else:
+            self._storage = None
+            self._chroma = chromadb.PersistentClient(path=str(settings.chroma_path))
+            self._collection = self._chroma.get_collection(COLLECTION)
+
         self.limiter = RateLimiter(settings.rate_limit_per_minute)
         self._glossary_sections = _load_glossary_sections(settings.corpus_dir)
 
@@ -176,39 +186,62 @@ class RagEngine:
         )
         query_vector = q_emb.data[0].embedding
 
-        n_docs = self._collection.count()
-        if n_docs == 0:
-            return RagAnswer(
-                text="コーパスが空です。`python3 scripts/ingest.py` を実行してください。",
-                sources=[],
+        # Use Supabase or Chroma based on configuration
+        if self._storage:
+            # Supabase vector search
+            n_docs = self._storage.count_chunks()
+            if n_docs == 0:
+                return RagAnswer(
+                    text="コーパスが空です。`python3 scripts/migrate_to_supabase.py` を実行してください。",
+                    sources=[],
+                )
+
+            pool = _rag_pool_size(self._settings.rag_top_k)
+            max_d = _rag_max_distance()
+            results = self._storage.vector_search(query_vector, top_k=pool, max_distance=max_d)
+
+            picked: list[tuple[str, str, dict]] = []
+            for r in results:
+                doc = r.get("content", "")
+                src = r.get("source_name", "unknown")
+                picked.append((doc, src, {}))
+                if len(picked) >= self._settings.rag_top_k:
+                    break
+        else:
+            # Chroma vector search (legacy)
+            n_docs = self._collection.count()
+            if n_docs == 0:
+                return RagAnswer(
+                    text="コーパスが空です。`python3 scripts/ingest.py` を実行してください。",
+                    sources=[],
+                )
+
+            pool = _rag_pool_size(self._settings.rag_top_k)
+            res = self._collection.query(
+                query_embeddings=[query_vector],
+                n_results=min(pool, n_docs),
+                include=["documents", "metadatas", "distances"],
             )
 
-        pool = _rag_pool_size(self._settings.rag_top_k)
-        res = self._collection.query(
-            query_embeddings=[query_vector],
-            n_results=min(pool, n_docs),
-            include=["documents", "metadatas", "distances"],
-        )
+            docs = (res.get("documents") or [[]])[0] or []
+            metas = (res.get("metadatas") or [[]])[0] or []
+            dists = (res.get("distances") or [[]])[0] or []
 
-        docs = (res.get("documents") or [[]])[0] or []
-        metas = (res.get("metadatas") or [[]])[0] or []
-        dists = (res.get("distances") or [[]])[0] or []
-
-        max_d = _rag_max_distance()
-        use_dist = max_d is not None and len(dists) == len(docs)
-        picked: list[tuple[str, str, dict]] = []
-        for doc, meta, dist in zip(
-            docs,
-            metas,
-            dists if use_dist else [0.0] * len(docs),
-            strict=True,
-        ):
-            if use_dist and dist > max_d:
-                continue
-            src = (meta or {}).get("source") or "unknown"
-            picked.append((doc, src, meta or {}))
-            if len(picked) >= self._settings.rag_top_k:
-                break
+            max_d = _rag_max_distance()
+            use_dist = max_d is not None and len(dists) == len(docs)
+            picked: list[tuple[str, str, dict]] = []
+            for doc, meta, dist in zip(
+                docs,
+                metas,
+                dists if use_dist else [0.0] * len(docs),
+                strict=True,
+            ):
+                if use_dist and dist > max_d:
+                    continue
+                src = (meta or {}).get("source") or "unknown"
+                picked.append((doc, src, meta or {}))
+                if len(picked) >= self._settings.rag_top_k:
+                    break
 
         gloss_excerpts = _glossary_boost(question, self._glossary_sections)
 
@@ -257,7 +290,8 @@ class RagEngine:
         return RagAnswer(text=text, sources=source_names)
 
     def add_to_corpus(self, content: str, source_name: str) -> None:
-        """Chunk, embed, and upsert into Chroma. Also saves file to corpus dir."""
+        """Chunk, embed, and upsert into Supabase/Chroma. Also saves file to corpus dir."""
+        # Always save to local file system for backup
         file_path = self._settings.corpus_dir / source_name
         file_path.write_text(content, encoding="utf-8")
 
@@ -266,7 +300,6 @@ class RagEngine:
             return
 
         texts = [c[0] for c in chunks]
-        metas = [c[1] for c in chunks]
 
         resp = self._oai.embeddings.create(
             model=self._settings.ai_embedding_model,
@@ -274,10 +307,18 @@ class RagEngine:
         )
         embeddings = [e.embedding for e in sorted(resp.data, key=lambda x: x.index)]
 
-        ids = []
-        for i, (text, meta) in enumerate(zip(texts, metas, strict=True)):
-            src = meta["source"]
-            h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
-            ids.append(f"{src}_{i}_{h}")
-        # Use upsert so repeated identical questions don't cause duplicate-ID errors
-        self._collection.upsert(ids=ids, documents=texts, metadatas=metas, embeddings=embeddings)
+        if self._storage:
+            # Save to Supabase
+            doc_id = self._storage.upsert_document(source_name, content)
+            chunk_tuples = list(zip(texts, embeddings, strict=True))
+            self._storage.upsert_chunks(doc_id, source_name, chunk_tuples)
+        else:
+            # Save to Chroma (legacy)
+            metas = [c[1] for c in chunks]
+            ids = []
+            for i, (text, meta) in enumerate(zip(texts, metas, strict=True)):
+                src = meta["source"]
+                h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
+                ids.append(f"{src}_{i}_{h}")
+            # Use upsert so repeated identical questions don't cause duplicate-ID errors
+            self._collection.upsert(ids=ids, documents=texts, metadatas=metas, embeddings=embeddings)

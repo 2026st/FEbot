@@ -28,6 +28,9 @@ class Settings:
     corpus_dir: Path
     rag_top_k: int
     rate_limit_per_minute: int
+    supabase_url: str
+    supabase_key: str
+    use_supabase: bool
 
     @staticmethod
     def load(*, require_slack: bool = True) -> Settings:
@@ -46,6 +49,10 @@ class Settings:
         chroma = Path(os.environ.get("CHROMA_PATH", str(root / "data" / "chroma"))).resolve()
         corpus = Path(os.environ.get("CORPUS_DIR", str(root / "data" / "corpus"))).resolve()
 
+        supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+        supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
+        use_supabase = bool(supabase_url and supabase_key)
+
         return Settings(
             slack_token=slack_token,
             slack_app_token=slack_app_token,
@@ -59,6 +66,9 @@ class Settings:
             corpus_dir=corpus,
             rag_top_k=int(os.environ.get("RAG_TOP_K", "5")),
             rate_limit_per_minute=int(os.environ.get("RATE_LIMIT_PER_MINUTE", "20")),
+            supabase_url=supabase_url,
+            supabase_key=supabase_key,
+            use_supabase=use_supabase,
         )
 
     def rag_enabled(self) -> bool:

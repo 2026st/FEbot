@@ -1,0 +1,9 @@
+Collecting ddgs
+  Using cached ddgs-9.14.0-py3-none-any.whl.metadata (20 kB)
+Requirement already satisfied: click>=8.1.8 in c:\users\user\febot\.venv\lib\site-packages (from ddgs) (8.3.2)
+Requirement already satisfied: primp>=1.2.0 in c:\users\user\febot\.venv\lib\site-packages (from ddgs) (1.2.2)
+Requirement already satisfied: lxml>=4.9.4 in c:\users\user\febot\.venv\lib\site-packages (from ddgs) (6.1.0)
+Requirement already satisfied: colorama in c:\users\user\febot\.venv\lib\site-packages (from click>=8.1.8->ddgs) (0.4.6)
+Using cached ddgs-9.14.0-py3-none-any.whl (67 kB)
+Installing collected packages: ddgs
+Successfully installed ddgs-9.14.0
