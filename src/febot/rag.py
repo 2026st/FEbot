@@ -321,4 +321,6 @@ class RagEngine:
                 h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
                 ids.append(f"{src}_{i}_{h}")
             # Use upsert so repeated identical questions don't cause duplicate-ID errors
-            self._collection.upsert(ids=ids, documents=texts, metadatas=metas, embeddings=embeddings)
+            self._collection.upsert(
+                ids=ids, documents=texts, metadatas=metas, embeddings=embeddings
+            )

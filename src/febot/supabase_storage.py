@@ -161,11 +161,7 @@ class SupabaseStorage:
             Document count
         """
         try:
-            result = (
-                self.client.table("corpus_documents")
-                .select("id", count="exact")
-                .execute()
-            )
+            result = self.client.table("corpus_documents").select("id", count="exact").execute()
             return result.count if result.count is not None else 0
         except Exception as e:
             log.error("Failed to count documents: %s", e)
@@ -178,11 +174,7 @@ class SupabaseStorage:
             Chunk count
         """
         try:
-            result = (
-                self.client.table("corpus_chunks")
-                .select("id", count="exact")
-                .execute()
-            )
+            result = self.client.table("corpus_chunks").select("id", count="exact").execute()
             return result.count if result.count is not None else 0
         except Exception as e:
             log.error("Failed to count chunks: %s", e)

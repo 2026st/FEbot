@@ -96,7 +96,7 @@ def main() -> None:
             resp = oai.embeddings.create(model=settings.ai_embedding_model, input=batch_chunks)
             ordered = sorted(resp.data, key=lambda x: x.index)
             embeddings.extend(item.embedding for item in ordered)
-            print(f"  Embedded chunks {i+1}-{min(i+batch_size, len(chunks))}/{len(chunks)}")
+            print(f"  Embedded chunks {i + 1}-{min(i + batch_size, len(chunks))}/{len(chunks)}")
 
         # Save chunks with embeddings to Supabase
         chunk_tuples = list(zip(chunks, embeddings, strict=True))
