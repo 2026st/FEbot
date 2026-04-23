@@ -6,6 +6,8 @@ import logging
 
 from openai import OpenAI
 
+from febot.rag import TokenUsage
+
 log = logging.getLogger(__name__)
 
 SEARCH_SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
@@ -26,11 +28,13 @@ def search(query: str, max_results: int = 5) -> list[dict]:
         return []
 
 
-def build_answer(oai: OpenAI, model: str, question: str, results: list[dict]) -> tuple[str, str]:
+def build_answer(
+    oai: OpenAI, model: str, question: str, results: list[dict]
+) -> tuple[str, str, TokenUsage]:
     """Generate answer from web results using LLM.
 
     Returns:
-        (slack_reply_text, corpus_markdown_to_save)
+        (slack_reply_text, corpus_markdown_to_save, token_usage)
     """
     context_parts = []
     for r in results:
@@ -50,8 +54,14 @@ def build_answer(oai: OpenAI, model: str, question: str, results: list[dict]) ->
         temperature=0.3,
     )
     answer_text = (chat.choices[0].message.content or "").strip()
+    usage = TokenUsage(
+        prompt_tokens=chat.usage.prompt_tokens if chat.usage else 0,
+        completion_tokens=chat.usage.completion_tokens if chat.usage else 0,
+        model=model,
+        source="web_search",
+    )
 
     urls = "\n".join(f"- {r.get('href', '')}" for r in results if r.get("href"))
     corpus_md = f"# Q: {question}\n\n{answer_text}\n\n## 参照URL\n{urls}\n"
 
-    return answer_text, corpus_md
+    return answer_text, corpus_md, usage

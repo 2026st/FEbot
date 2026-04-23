@@ -14,7 +14,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from febot import web_search as ws
 from febot.config import Settings
 from febot.quiz import QuizItem, load_quiz_items, normalize_answer, pick_random
-from febot.rag import RagEngine
+from febot.rag import RagEngine, TokenUsage
 
 log = logging.getLogger(__name__)
 
@@ -74,9 +74,25 @@ def _make_cache_filename(question: str) -> str:
     return f"web_cache_{date}_{slug}.md"
 
 
+def _post_token_log(client, settings: Settings, user_id: str, usage: TokenUsage) -> None:
+    channel = settings.slack_token_log_channel
+    if not channel:
+        return
+    msg = (
+        f"*Token usage* | user: <@{user_id}> | source: {usage.source} | "
+        f"model: `{usage.model}` | "
+        f"prompt: {usage.prompt_tokens} | completion: {usage.completion_tokens}"
+    )
+    try:
+        client.chat_postMessage(channel=channel, text=msg)
+    except Exception as e:
+        log.warning("token log post failed (non-fatal): %s", e)
+
+
 def _handle_rag_question(
     rag: RagEngine,
     settings: Settings,
+    client,
     text: str,
     user_id: str,
     say,
@@ -94,6 +110,8 @@ def _handle_rag_question(
 
     if out is not None:
         say(out.text, **kwargs)
+        if out.usage:
+            _post_token_log(client, settings, user_id, out.usage)
         return
 
     # No knowledge in corpus → web search fallback
@@ -108,7 +126,9 @@ def _handle_rag_question(
         return
 
     try:
-        slack_text, corpus_md = ws.build_answer(rag._oai, settings.ai_chat_model, text, results)
+        slack_text, corpus_md, ws_usage = ws.build_answer(
+            rag._oai, settings.ai_chat_model, text, results
+        )
     except Exception as e:
         log.exception("web answer build failed: %s", e)
         say("Web検索結果の要約中にエラーが発生しました。", **kwargs)
@@ -123,6 +143,7 @@ def _handle_rag_question(
         slack_text + "\n\n_（Web検索より取得。次回からはナレッジベースで回答します）_",
         **kwargs,
     )
+    _post_token_log(client, settings, user_id, ws_usage)
 
 
 def create_app(settings: Settings) -> tuple[App, BotState]:
@@ -137,7 +158,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         respond(_help_text(settings))
 
     @app.event("app_mention")
-    def on_mention(event, say, logger):
+    def on_mention(event, say, client, logger):
         text = _strip_mentions(event.get("text", ""))
         if not text:
             say(
@@ -164,6 +185,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         _handle_rag_question(
             rag,
             settings,
+            client,
             text,
             event.get("user", ""),
             say,
@@ -171,7 +193,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         )
 
     @app.event("message")
-    def on_message(event, say, logger):
+    def on_message(event, say, client, logger):
         if event.get("bot_id") or event.get("subtype") in (
             "bot_message",
             "message_changed",
@@ -218,7 +240,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if rag is None:
             say(NO_AI_REPLY)
             return
-        _handle_rag_question(rag, settings, text, user, say)
+        _handle_rag_question(rag, settings, client, text, user, say)
 
     return app, state
 

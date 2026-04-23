@@ -20,6 +20,7 @@ def _repo_root() -> Path:
 class Settings:
     slack_token: str
     slack_app_token: str
+    slack_token_log_channel: str | None
     ai_api_key: str
     ai_base_url: str | None
     ai_chat_model: str
@@ -45,6 +46,7 @@ class Settings:
             if not slack_app_token:
                 raise RuntimeError("SLACK_APP_TOKEN is required for Socket Mode")
 
+        slack_token_log_channel = os.environ.get("SLACK_TOKEN_LOG_CHANNEL", "").strip() or None
         base = os.environ.get("AI_BASE_URL", "").strip() or None
         chroma = Path(os.environ.get("CHROMA_PATH", str(root / "data" / "chroma"))).resolve()
         corpus = Path(os.environ.get("CORPUS_DIR", str(root / "data" / "corpus"))).resolve()
@@ -56,6 +58,7 @@ class Settings:
         return Settings(
             slack_token=slack_token,
             slack_app_token=slack_app_token,
+            slack_token_log_channel=slack_token_log_channel,
             ai_api_key=ai_key,
             ai_base_url=base,
             ai_chat_model=os.environ.get("AI_CHAT_MODEL", "gpt-4o-mini").strip(),
