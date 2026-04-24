@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import random
 import re
 from dataclasses import dataclass, field
 
@@ -19,6 +20,14 @@ from febot.rag import RagEngine
 log = logging.getLogger(__name__)
 
 QUIZ_KEYWORDS = ("過去問", "出題", "練習問題")
+
+_THINKING_MESSAGES = [
+    "🤔 thinking...",
+    "📚 コーパスをあさり中...",
+    "🔍 知識の海を泳いでいます...",
+    "⚙️ RAGエンジン起動中...",
+    "🧠 基本情報技術者試験ボット、全力稼働中...",
+]
 
 NO_AI_REPLY = (
     "`AI_API_KEY` が設定されていないため、RAG（用語解説・生成回答）は利用できません。\n"
@@ -84,6 +93,8 @@ def _handle_rag_question(
 ) -> None:
     """RAG → Web search fallback → corpus save → reply."""
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
+
+    say(random.choice(_THINKING_MESSAGES), **kwargs)
 
     try:
         out = rag.answer(user_id, text)
