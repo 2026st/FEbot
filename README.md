@@ -79,6 +79,7 @@
    - `RAG_POOL_MULT` … 距離フィルタ前に読む候補の倍率（既定 `5`）
    - `RATE_LIMIT_PER_MINUTE` … Slack ユーザーあたりの RAG 呼び出し上限（既定 `20`）
    - `WEB_SEARCH_MAX_RESULTS` … Web 検索の最大件数（既定 `5`）
+   - `SUPABASE_URL` / `SUPABASE_KEY` … Supabase 移行スクリプト利用時に必要（通常運用では任意）
 
    最小例（OpenAI 互換）:
 
