@@ -4,7 +4,7 @@
 
 ## 必読ファイル（作業前）
 - `README.md`（セットアップ、環境変数、実行手順）
-- `SKILL.md`（変更時の同期ルールと DoD）
+- `.claude/skills/change-sync-Policy/SKILL.md`（変更時の同期ルールと DoD）
 - `pyproject.toml`（Python バージョンと依存）
 - `docs/20260405-ipa-corpus.md`（IPA コーパス再生成の前提）
 - `docs/20260416-bedrock-migration.md`（Bedrock 関連の現状メモ）
