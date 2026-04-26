@@ -5,5 +5,5 @@ openai>=1.40.0
 python-dotenv>=1.0.0
 pypdf>=5.0.0
 PyYAML>=6.0.0
-ddgs>=9.0.0
+ddgs>=9.14.1
 supabase>=2.0.0
