@@ -93,7 +93,30 @@ def _handle_rag_question(
         return
 
     if out is not None:
-        say(out.text, **kwargs)
+        reply_text = out.text
+        citations = []
+        for src in out.sources:
+            if src.startswith("web_cache_"):
+                try:
+                    content = (settings.corpus_dir / src).read_text(encoding="utf-8")
+                    for line in content.splitlines():
+                        if line.startswith("- http"):
+                            url = line.lstrip("- ").strip()
+                            if url not in citations:
+                                citations.append(url)
+                except Exception:
+                    pass
+            else:
+                # Handle 'glossary.md（用語マッチ）' or normal files
+                clean_src = src.split("（")[0] if "（" in src else src
+                link = f"https://github.com/2026st/FEbot/blob/main/data/corpus/{clean_src}"
+                if link not in citations:
+                    citations.append(link)
+
+        if citations:
+            reply_text += "\n\n【出典】\n" + "\n".join(f"- {c}" for c in citations)
+
+        say(reply_text, **kwargs)
         return
 
     # No knowledge in corpus → web search fallback
