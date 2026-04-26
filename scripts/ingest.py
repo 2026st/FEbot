@@ -84,7 +84,7 @@ def main() -> None:
     coll = chroma.get_or_create_collection(name=COLLECTION, metadata={"hnsw:space": "cosine"})
 
     ids = []
-    for i, (doc, meta) in enumerate(zip(texts, metas, strict=True)):
+    for i, (doc, meta) in enumerate(zip(texts, metas)):
         h = hashlib.sha256(f"{meta['source']}:{i}:{doc[:80]}".encode()).hexdigest()[:24]
         ids.append(f"{meta['source']}_{i}_{h}")
 

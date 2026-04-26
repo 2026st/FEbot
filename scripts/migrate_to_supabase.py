@@ -99,7 +99,7 @@ def main() -> None:
             print(f"  Embedded chunks {i + 1}-{min(i + batch_size, len(chunks))}/{len(chunks)}")
 
         # Save chunks with embeddings to Supabase
-        chunk_tuples = list(zip(chunks, embeddings, strict=True))
+        chunk_tuples = list(zip(chunks, embeddings))
         storage.upsert_chunks(doc_id, path.name, chunk_tuples)
 
         total_chunks += len(chunks)

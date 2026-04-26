@@ -233,7 +233,6 @@ class RagEngine:
                 docs,
                 metas,
                 dists if use_dist else [0.0] * len(docs),
-                strict=True,
             ):
                 if use_dist and dist > max_d:
                     continue
@@ -309,13 +308,13 @@ class RagEngine:
         if self._storage:
             # Save to Supabase
             doc_id = self._storage.upsert_document(source_name, content)
-            chunk_tuples = list(zip(texts, embeddings, strict=True))
+            chunk_tuples = list(zip(texts, embeddings))
             self._storage.upsert_chunks(doc_id, source_name, chunk_tuples)
         else:
             # Save to Chroma (legacy)
             metas = [c[1] for c in chunks]
             ids = []
-            for i, (text, meta) in enumerate(zip(texts, metas, strict=True)):
+            for i, (text, meta) in enumerate(zip(texts, metas)):
                 src = meta["source"]
                 h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
                 ids.append(f"{src}_{i}_{h}")
