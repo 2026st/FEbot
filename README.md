@@ -14,6 +14,7 @@
 - 過去問・練習問題の出題（`data/corpus/sample-questions.md` をパース）
 - 問題解説機能（スレッドで正誤と解説を返す）
 - コーパスに該当がない質問は **DuckDuckGo 検索 → LLM で要約 → コーパスへ保存** し、次回以降はナレッジとして検索可能
+- **コンテンツフィルター機能**（LLM を使って質問が IT・プログラミング関連かを判定し、無関係な質問をフィルタリング）
 
 ## 非機能要件
 
@@ -79,6 +80,7 @@
    - `RAG_POOL_MULT` … 距離フィルタ前に読む候補の倍率（既定 `5`）
    - `RATE_LIMIT_PER_MINUTE` … Slack ユーザーあたりの RAG 呼び出し上限（既定 `20`）
    - `WEB_SEARCH_MAX_RESULTS` … Web 検索の最大件数（既定 `5`）
+   - `CONTENT_FILTER_ENABLED` … コンテンツフィルターの有効/無効（既定 `true`。IT・プログラミング関連以外の質問をフィルタリング）
    - `SUPABASE_URL` / `SUPABASE_KEY` … Supabase 移行スクリプト利用時に必要（通常運用では任意）
 
    最小例（OpenAI 互換）:

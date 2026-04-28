@@ -14,6 +14,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from febot import web_search as ws
 from febot.config import Settings
+from febot.content_filter import ContentFilter
 from febot.quiz import QuizItem, load_quiz_items, normalize_answer, pick_random
 from febot.rag import RagEngine
 
@@ -161,6 +162,9 @@ def _handle_rag_question(
 
 def create_app(settings: Settings) -> tuple[App, BotState]:
     rag: RagEngine | None = RagEngine(settings) if settings.rag_enabled() else None
+    content_filter: ContentFilter | None = (
+        ContentFilter(settings) if settings.rag_enabled() else None
+    )
     state = BotState(quiz_items=load_quiz_items(settings.corpus_dir))
 
     app = App(token=settings.slack_token)
@@ -195,6 +199,18 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if rag is None:
             say(NO_AI_REPLY, thread_ts=event.get("thread_ts", event["ts"]))
             return
+
+        # Content filter: check if question is IT/programming related
+        if content_filter is not None:
+            filter_result = content_filter.validate(text)
+            if not filter_result.is_valid:
+                say(
+                    "申し訳ございません。\nその質問は基本情報技術者試験やIT・プログラミングに関連していないため、回答できません。",
+                    thread_ts=event.get("thread_ts", event["ts"]),
+                )
+                log.info(f"Question filtered out: {text[:100]}... Reason: {filter_result.reason}")
+                return
+
         _handle_rag_question(
             rag,
             settings,
@@ -252,6 +268,15 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if rag is None:
             say(NO_AI_REPLY)
             return
+
+        # Content filter: check if question is IT/programming related
+        if content_filter is not None:
+            filter_result = content_filter.validate(text)
+            if not filter_result.is_valid:
+                say("申し訳ございませんが、その質問は基本情報技術者試験やIT・プログラミングに関連していないため、回答できません。")
+                log.info(f"Question filtered out (DM): {text[:100]}... Reason: {filter_result.reason}")
+                return
+
         _handle_rag_question(rag, settings, text, user, say)
 
     return app, state

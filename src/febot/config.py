@@ -31,6 +31,7 @@ class Settings:
     supabase_url: str
     supabase_key: str
     use_supabase: bool
+    content_filter_enabled: bool
 
     @staticmethod
     def load(*, require_slack: bool = True) -> Settings:
@@ -53,6 +54,8 @@ class Settings:
         supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
         use_supabase = bool(supabase_url and supabase_key)
 
+        content_filter_enabled = os.environ.get("CONTENT_FILTER_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+
         return Settings(
             slack_token=slack_token,
             slack_app_token=slack_app_token,
@@ -69,6 +72,7 @@ class Settings:
             supabase_url=supabase_url,
             supabase_key=supabase_key,
             use_supabase=use_supabase,
+            content_filter_enabled=content_filter_enabled,
         )
 
     def rag_enabled(self) -> bool:
