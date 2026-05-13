@@ -57,8 +57,29 @@ class OpenAICompatBackend:
         return [e.embedding for e in sorted(resp.data, key=lambda x: x.index)]
 
 
+class BedrockChatOpenAIEmbedBackend:
+    """Bedrock for chat; OpenAI-compatible API for embeddings (RAG / ingest)."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._chat = BedrockClient(settings)
+        self._embed = OpenAICompatBackend(settings)
+
+    def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float,
+        max_tokens: int | None,
+    ) -> str:
+        return self._chat.chat(system, user, temperature=temperature, max_tokens=max_tokens)
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        return self._embed.embed_texts(texts)
+
+
 def get_llm_backend(settings: Settings) -> ChatEmbedBackend:
-    """Bedrock if configured; otherwise OpenAI-compatible (requires AI_API_KEY when not Bedrock)."""
+    """Bedrock chat if configured; embeddings always use OpenAI-compatible API when Bedrock is on."""
     if settings.use_bedrock:
-        return BedrockClient(settings)
+        return BedrockChatOpenAIEmbedBackend(settings)
     return OpenAICompatBackend(settings)

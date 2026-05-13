@@ -31,7 +31,7 @@
 - **言語**: Python 3.10 以上（`pyproject.toml` の `requires-python` に準拠。`X | Y` 型表記のため 3.9 非対応）
 - **Slack**: [slack-bolt](https://slack.dev/bolt-python/)（**Socket Mode**）
 - **ベクトルDB**: Chroma（ローカル永続、`CHROMA_PATH`）
-- **LLM / 埋め込み**: **Amazon Bedrock** または **OpenAI 互換 API**（`openai` クライアント）。`BEDROCK_CHAT_MODEL_ID` と `BEDROCK_EMBEDDING_MODEL_ID` の**両方**を環境に設定すると Bedrock、それ以外は `AI_API_KEY`（`USE_BEDROCK` で上書き可。詳細は `.env.example`）
+- **LLM / 埋め込み**: チャットは **Amazon Bedrock**（`USE_BEDROCK` または `BEDROCK_CHAT_MODEL_ID`）または **OpenAI 互換**（`AI_API_KEY`）。**埋め込み（ingest・RAG クエリ）は常に OpenAI 互換 API**（`AI_API_KEY`・`AI_EMBEDDING_MODEL` 等）。Bedrock 利用時も埋め込み用に `AI_API_KEY` が必要（詳細は `.env.example`）
 - **Web 検索フォールバック**: `ddgs`（DuckDuckGo、API キー不要）
 - **コーパス**: `data/corpus/*.md`。オリジナル教材に加え、IPA 公表 PDF から抽出した `ipa-*.md` を想定。利用上の留意点は [IPA FAQ（試験制度・その他）](https://www.ipa.go.jp/shiken/faq.html#seido) を確認すること。PDF の再取得・テキスト再生成は `python3 scripts/ipa_build_corpus.py --fetch`（詳細は [docs/20260405-ipa-corpus.md](docs/20260405-ipa-corpus.md)）。
 
@@ -66,10 +66,10 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
 
    **RAG・ingest・Web 要約（Bedrock または OpenAI 互換）**
 
-   - **バックエンドの優先**: `BEDROCK_CHAT_MODEL_ID` と `BEDROCK_EMBEDDING_MODEL_ID` を**ともに**設定 → Bedrock。`USE_BEDROCK` を `false` にすると OpenAI 互換に強制、`true` にすると両モデル ID を省略しても既定で Bedrock。
-   - **Bedrock 時**: AWS 認証（`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`、プロファイル、IAM ロール等）、`AWS_REGION` または `AWS_DEFAULT_REGION`（既定 `ap-northeast-1`）、`BEDROCK_CHAT_MODEL_ID`、`BEDROCK_EMBEDDING_MODEL_ID`、`BEDROCK_EMBEDDING_DIMENSIONS`（Titan v2、既定 `1024`）。IAM の例: `bedrock:InvokeModel`、Converse 利用時は `bedrock:Converse`。
-   - **OpenAI 互換時（上記2つの Bedrock モデル ID が無い場合）**: `AI_API_KEY`、任意で `AI_BASE_URL`、`AI_CHAT_MODEL`（既定 `gpt-4o-mini`）、`AI_EMBEDDING_MODEL`（既定 `text-embedding-3-small`）
-   - **埋め込み次元**: Bedrock（Titan）と OpenAI でベクトル次元が異なる。**モデルやプロバイダを変えたら `ingest` を再実行**すること。
+   - **バックエンドの優先**: `USE_BEDROCK=true`、または `BEDROCK_CHAT_MODEL_ID` を設定するとチャットは Bedrock。`USE_BEDROCK=false` で OpenAI 互換のみに固定。
+   - **Bedrock（チャット）時**: AWS 認証、`AWS_REGION` または `AWS_DEFAULT_REGION`（既定 `ap-northeast-1`）、`BEDROCK_CHAT_MODEL_ID`。IAM の例: `bedrock:InvokeModel`、Converse 利用時は `bedrock:Converse`。**加えて埋め込み用に `AI_API_KEY`（および任意で `AI_BASE_URL`・`AI_EMBEDDING_MODEL`）が必須。**
+   - **OpenAI 互換のみ（Bedrock 未使用）**: `AI_API_KEY`、任意で `AI_BASE_URL`、`AI_CHAT_MODEL`（既定 `gpt-4o-mini`）、`AI_EMBEDDING_MODEL`（既定 `text-embedding-3-small`）
+   - **埋め込み次元**: `AI_EMBEDDING_MODEL` を変えたら Chroma / pgvector の次元と一致させる。**モデルを変えたら `ingest` を再実行**すること。
 
    **任意（パス・検索チューニング）**
 
@@ -83,14 +83,14 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    - `CONTENT_FILTER_ENABLED` … コンテンツフィルターの有効/無効（既定 `true`。IT・プログラミング関連以外の質問をフィルタリング）
    - `SUPABASE_URL` / `SUPABASE_KEY` … Supabase 移行スクリプト利用時に必要（通常運用では任意）
 
-   最小例（Bedrock・ローカルでキーを使う場合。本番は IAM ロール推奨）:
+   最小例（Bedrock チャット＋OpenAI 埋め込み。本番は IAM ロール推奨）:
 
    ```bash
    AWS_REGION=ap-northeast-1
    AWS_ACCESS_KEY_ID=...
    AWS_SECRET_ACCESS_KEY=...
    BEDROCK_CHAT_MODEL_ID=anthropic.claude-sonnet-4-6
-   BEDROCK_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
+   AI_API_KEY=sk-...
    ```
 
    最小例（OpenAI 互換のみ）:
@@ -105,7 +105,7 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    python3 scripts/ipa_build_corpus.py --fetch
    ```
 
-4. RAG を使う場合は、選択したバックエンド（Bedrock なら AWS 認証＋モデル、OpenAI 互換なら `AI_API_KEY`）が揃ったうえで、コーパスを埋め込み Chroma を生成する（**プロバイダや埋め込みモデルを変えたら再 ingest が必要**）。
+4. RAG を使う場合は、AWS＋Bedrock チャット用設定に加え `AI_API_KEY`、または OpenAI 互換のみなら `AI_API_KEY` が揃ったうえで、コーパスを埋め込み Chroma を生成する（**埋め込みモデルを変えたら再 ingest が必要**）。
 
    ```bash
    python3 scripts/ingest.py

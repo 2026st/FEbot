@@ -32,9 +32,9 @@ _THINKING_MESSAGES = [
 
 NO_AI_REPLY = (
     "RAG（用語解説・生成回答）を使う設定がありません。\n"
-    "• Bedrock: `BEDROCK_CHAT_MODEL_ID` と `BEDROCK_EMBEDDING_MODEL_ID` を設定し、AWS 認証を用意してから "
+    "• Bedrock（チャット）: `BEDROCK_CHAT_MODEL_ID` と AWS 認証に加え、埋め込み用に `AI_API_KEY` を設定し "
     "`python3 scripts/ingest.py` を実行してください。\n"
-    "• OpenAI 互換のみ: 上記 Bedrock の2キーを `.env` に置かず（または空にし）、`AI_API_KEY` を設定して ingest してください。"
+    "• OpenAI 互換のみ: `USE_BEDROCK=false` にするか Bedrock 用チャット ID を空にし、`AI_API_KEY` を設定して ingest してください。"
 )
 
 
@@ -309,7 +309,7 @@ def run() -> None:
     else:
         log.warning(
             "RAG 用の認証が無いため Chroma をスキップします（Slack のみ接続確認モード）。"
-            "Bedrock または AI_API_KEY を設定し ingest を実行してください。"
+            "Bedrock 利用時は AWS 認証に加え埋め込み用の AI_API_KEY が必要。OpenAI 互換のみなら AI_API_KEY を設定し ingest を実行してください。"
         )
     app, _state = create_app(settings)
     handler = SocketModeHandler(app, settings.slack_app_token)

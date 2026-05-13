@@ -25,17 +25,14 @@ def _aws_credentials_available() -> bool:
 
 
 def _should_use_bedrock() -> bool:
-    """True if Bedrock is selected via USE_BEDROCK or both BEDROCK_* model IDs are set."""
+    """True if USE_BEDROCK is enabled, or BEDROCK_CHAT_MODEL_ID is set (chat on Bedrock; embed uses OpenAI API)."""
     raw = os.environ.get("USE_BEDROCK", "").strip().lower()
     if raw in ("0", "false", "no"):
         return False
     if raw in ("1", "true", "yes"):
         return True
-    chat = os.environ.get("BEDROCK_CHAT_MODEL_ID")
-    emb = os.environ.get("BEDROCK_EMBEDDING_MODEL_ID")
-    if chat is None or emb is None:
-        return False
-    return bool(chat.strip()) and bool(emb.strip())
+    chat = os.environ.get("BEDROCK_CHAT_MODEL_ID", "").strip()
+    return bool(chat)
 
 
 @dataclass(frozen=True)
@@ -129,7 +126,9 @@ class Settings:
 
     def rag_enabled(self) -> bool:
         if self.use_bedrock:
-            if not self.aws_region or not self.bedrock_chat_model_id or not self.bedrock_embedding_model_id:
+            if not self.aws_region or not self.bedrock_chat_model_id:
                 return False
-            return _aws_credentials_available()
+            if not _aws_credentials_available():
+                return False
+            return bool(self.ai_api_key)
         return bool(self.ai_api_key)

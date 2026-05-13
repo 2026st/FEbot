@@ -12,8 +12,8 @@
 ## このプロジェクトの前提
 - Python は `3.9+`。`pyproject.toml` の `requires-python` に従うこと。
 - Slack Bot は Socket Mode 前提。
-- RAG・ingest・Web 要約・コンテンツフィルターは **Bedrock または OpenAI 互換**（[`src/febot/llm_backend.py`](src/febot/llm_backend.py)）。Bedrock 時は AWS 標準認証。
-- `rag_enabled()` は Bedrock 選択時に AWS 認証が解決できるとき、または OpenAI 互換選択時に `AI_API_KEY` があるとき True。
+- RAG・ingest・Web 要約・コンテンツフィルターは [`src/febot/llm_backend.py`](src/febot/llm_backend.py)。**チャットが Bedrock のときも埋め込みは OpenAI 互換 API**（`AI_API_KEY`）。Bedrock 時は AWS 標準認証に加え `AI_API_KEY` が必要。
+- `rag_enabled()` は Bedrock 選択時に AWS 認証が解決でき、かつ `AI_API_KEY` があるとき、または OpenAI 互換のみのときに `AI_API_KEY` があるとき True。
 
 ## 実行コマンド（基本）
 - 依存導入: `python3 -m pip install -e .`

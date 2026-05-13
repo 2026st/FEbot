@@ -2,42 +2,43 @@
 
 ## 意図
 
-東京リージョンの Amazon Bedrock（Claude + Titan）と、OpenAI 互換 API を **環境変数で切り替え**る。Bedrock 用のモデル ID が揃っていれば Bedrock、無ければ `AI_API_KEY` による OpenAI 互換を使う。
+チャットは **Amazon Bedrock** または **OpenAI 互換 API** を環境で切り替える。**埋め込み（ingest・RAG のクエリベクトル）は常に OpenAI 互換 API**（`openai` クライアント、`AI_API_KEY`）を使う。Bedrock でチャットする構成でも Titan 等の Bedrock 埋め込みは使わない。
 
 ## どちらが選ばれるか
 
-| 条件 | 使用するバックエンド |
-|------|---------------------|
-| `USE_BEDROCK` が `false` / `0` / `no` | OpenAI 互換（`AI_API_KEY` 必須） |
-| `USE_BEDROCK` が `true` / `1` / `yes` | Bedrock（モデル ID 未指定時はコード既定で補完） |
-| 上記以外で `BEDROCK_CHAT_MODEL_ID` と `BEDROCK_EMBEDDING_MODEL_ID` が**ともに**非空 | Bedrock |
-| 上記以外 | OpenAI 互換（`AI_API_KEY` があれば RAG 有効） |
+| 条件 | チャット | 埋め込み |
+|------|----------|----------|
+| `USE_BEDROCK` が `false` / `0` / `no` | OpenAI 互換 | OpenAI 互換 |
+| `USE_BEDROCK` が `true` / `1` / `yes` | Bedrock | OpenAI 互換 |
+| 上記以外で `BEDROCK_CHAT_MODEL_ID` が非空 | Bedrock | OpenAI 互換 |
+| 上記以外 | OpenAI 互換 | OpenAI 互換 |
+
+`rag_enabled()` が True になるには、**常に `AI_API_KEY` が必要**。Bedrock 利用時はさらに AWS 認証が解決でき、`BEDROCK_CHAT_MODEL_ID`（または `USE_BEDROCK=true` 時の既定）が揃っていること。
 
 ## 環境変数（参照）
 
-| OpenAI 互換 | Bedrock |
-|-------------|---------|
-| `AI_API_KEY`（必須・Bedrock 未使用時） | AWS 標準認証 |
-| `AI_BASE_URL`（任意） | `AWS_REGION` / `AWS_DEFAULT_REGION` |
-| `AI_CHAT_MODEL` | `BEDROCK_CHAT_MODEL_ID` |
-| `AI_EMBEDDING_MODEL` | `BEDROCK_EMBEDDING_MODEL_ID` |
-| | `BEDROCK_EMBEDDING_DIMENSIONS`（Titan v2、既定 1024） |
-| | `USE_BEDROCK`（任意・上表のとおり） |
+| 用途 | 変数 |
+|------|------|
+| 埋め込み（必ず OpenAI 互換経由） | `AI_API_KEY`、`AI_EMBEDDING_MODEL`、任意 `AI_BASE_URL` |
+| OpenAI 互換のみのチャット | 上記に加え `AI_CHAT_MODEL` |
+| Bedrock のチャット | AWS 標準認証、`AWS_REGION` / `AWS_DEFAULT_REGION`、`BEDROCK_CHAT_MODEL_ID`、`USE_BEDROCK`（任意） |
+
+`BEDROCK_EMBEDDING_MODEL_ID` / `BEDROCK_EMBEDDING_DIMENSIONS` は **ランタイムの埋め込みには使わない**（互換のため設定に残せるが、[`BedrockClient`](../src/febot/bedrock_client.py) の Titan 用コードはハイブリッド経路では呼ばれない）。
 
 ## 移行手順
 
-1. AWS 側で対象モデルの **オンデマンドアクセス**（または利用可能な購入済みスループット）を有効化する。
-2. 実行主体（ローカルならプロファイル、本番ならタスク/EC2 ロール）に `bedrock:InvokeModel` および `bedrock:Converse`（Converse を使う場合）を付与する。
-3. `.env` に [`.env.example`](../.env.example) に沿って `AWS_REGION`・`BEDROCK_*` を設定する。長期アクセスキーはリポジトリに含めない。
-4. **Chroma の再生成**: 旧 OpenAI 埋め込み（例: 1536 次元）と Titan v2 既定（1024 次元）は互換でない。`data/chroma` の既存コレクションを前提にしない。`python3 scripts/ingest.py` を再実行する。
-5. **距離しきい値**: `RAG_MAX_DISTANCE` は旧ベクトル空間向けの値のままでは不適切な場合がある。回答が常に「見つからない」・ノイズが増えるときは調整する。
-6. **Supabase を使う場合**: pgvector の列次元が旧埋め込みに合わせて固定されている場合、スキーマ変更またはテーブル再作成後に `scripts/migrate_to_supabase.py` を再実行する。
+1. AWS 側でチャットモデルの **オンデマンドアクセス**（または利用可能な購入済みスループット）を有効化する。
+2. 実行主体に `bedrock:InvokeModel` および `bedrock:Converse`（利用する場合）を付与する。
+3. `.env` に [`.env.example`](../.env.example) に沿って AWS と `BEDROCK_CHAT_MODEL_ID` を設定し、**埋め込み用に `AI_API_KEY`** を設定する。
+4. **Chroma の再生成**: 旧 Titan（1024 次元）などと `AI_EMBEDDING_MODEL` の次元が異なる場合は `python3 scripts/ingest.py` を再実行する。
+5. **距離しきい値**: `RAG_MAX_DISTANCE` はベクトル空間に依存する。回答品質が変わったら調整する。
+6. **Supabase**: pgvector の列次元は `AI_EMBEDDING_MODEL` に合わせる。
 
 ## 実装メモ
 
 - チャットは `bedrock-runtime` の **Converse** を優先し、失敗時は Anthropic Messages 形式の **InvokeModel** にフォールバックする（[`src/febot/bedrock_client.py`](../src/febot/bedrock_client.py)）。
-- 埋め込みは Titan v2 の **InvokeModel** をテキストごとに呼び出す。
+- 埋め込みは [`src/febot/llm_backend.py`](../src/febot/llm_backend.py) の `BedrockChatOpenAIEmbedBackend` が **OpenAI 互換の Embeddings API** を呼ぶ。
 
 ## ロールバック
 
-`.env` で `BEDROCK_*` を外し `AI_API_KEY` のみにするか、`USE_BEDROCK=false` とする。
+`.env` で `BEDROCK_CHAT_MODEL_ID` を外し `USE_BEDROCK=false` とするか、チャットも `AI_API_KEY` のみに戻す。

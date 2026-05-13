@@ -49,7 +49,7 @@ def main() -> None:
     if not settings.rag_enabled():
         raise SystemExit(
             "埋め込み（migrate）を実行できません。"
-            "Bedrock 利用時は AWS 認証と BEDROCK_* が揃っていること。"
+            "Bedrock（チャット）利用時は AWS 認証・BEDROCK_CHAT_MODEL_ID に加え、埋め込み用の AI_API_KEY が必要です。"
             "OpenAI 互換のみの場合は AI_API_KEY を設定してください。"
         )
 
