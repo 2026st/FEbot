@@ -7,13 +7,13 @@
 - `.claude/skills/change-sync-Policy/SKILL.md`（変更時の同期ルールと DoD）
 - `pyproject.toml`（Python バージョンと依存）
 - `docs/20260405-ipa-corpus.md`（IPA コーパス再生成の前提）
-- `docs/20260416-bedrock-migration.md`（Bedrock 関連の現状メモ）
+- `docs/20260513-bedrock-openai-replacement.md`（Bedrock 環境変数・移行時の注意）
 
 ## このプロジェクトの前提
 - Python は `3.9+`。`pyproject.toml` の `requires-python` に従うこと。
 - Slack Bot は Socket Mode 前提。
-- 現行の RAG パイプラインは OpenAI 互換 API 前提（`config.py` / `rag.py` / `scripts/ingest.py`）。
-- `src/febot/llm.py` は存在するが、現行応答パイプラインには未接続。
+- RAG・ingest・Web 要約・コンテンツフィルターは **Bedrock または OpenAI 互換**（[`src/febot/llm_backend.py`](src/febot/llm_backend.py)）。Bedrock 時は AWS 標準認証。
+- `rag_enabled()` は Bedrock 選択時に AWS 認証が解決できるとき、または OpenAI 互換選択時に `AI_API_KEY` があるとき True。
 
 ## 実行コマンド（基本）
 - 依存導入: `python3 -m pip install -e .`
@@ -23,9 +23,9 @@
 - IPA コーパス再取得: `python3 scripts/ipa_build_corpus.py --fetch`
 
 ## 環境変数ポリシー
-- 機密情報（`SLACK_TOKEN`, `SLACK_APP_TOKEN`, `AI_API_KEY` など）をコードへ直書きしない。
+- 機密情報（`SLACK_TOKEN`, `SLACK_APP_TOKEN`, AWS 認証情報など）をコードへ直書きしない。
 - 設定は `.env` で管理し、共有時は `.env.example` を更新する。
-- `AI_API_KEY` 未設定時は RAG 応答と ingest が無効になる前提で作業する。
+- 選んだバックエンドに必要な認証が無い場合は RAG 応答と ingest が無効になる前提で作業する。
 
 ## 編集ルール
 - KISS / YAGNI / DRY を優先し、過剰実装を避ける。

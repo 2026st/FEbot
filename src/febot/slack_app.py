@@ -31,8 +31,10 @@ _THINKING_MESSAGES = [
 ]
 
 NO_AI_REPLY = (
-    "`AI_API_KEY` が設定されていないため、RAG（用語解説・生成回答）は利用できません。\n"
-    "Slack との接続は問題ありません。`.env` に `AI_API_KEY` を設定し、`python3 scripts/ingest.py` のあとで RAG を有効にしてください。"
+    "RAG（用語解説・生成回答）を使う設定がありません。\n"
+    "• Bedrock: `BEDROCK_CHAT_MODEL_ID` と `BEDROCK_EMBEDDING_MODEL_ID` を設定し、AWS 認証を用意してから "
+    "`python3 scripts/ingest.py` を実行してください。\n"
+    "• OpenAI 互換のみ: 上記 Bedrock の2キーを `.env` に置かず（または空にし）、`AI_API_KEY` を設定して ingest してください。"
 )
 
 
@@ -47,7 +49,7 @@ def _help_text(settings: Settings) -> str:
     )
     if not settings.rag_enabled():
         return base + (
-            "\n*現在の状態*: `AI_API_KEY` 未設定のため、用語・質問への生成回答のみオフです。"
+            "\n*現在の状態*: AI（Bedrock または OpenAI 互換）が利用できないため、用語・質問への生成回答のみオフです。"
             " Slack 連携の確認は可能です。\n"
         )
     return base
@@ -143,7 +145,7 @@ def _handle_rag_question(
         return
 
     try:
-        slack_text, corpus_md = ws.build_answer(rag._oai, settings.ai_chat_model, text, results)
+        slack_text, corpus_md = ws.build_answer(rag.llm, text, results)
     except Exception as e:
         log.exception("web answer build failed: %s", e)
         say("Web検索結果の要約中にエラーが発生しました。", **kwargs)
@@ -306,7 +308,8 @@ def run() -> None:
             raise SystemExit(1) from e
     else:
         log.warning(
-            "AI_API_KEY 未設定のため Chroma をスキップします（Slack のみ接続確認モード）。RAG を使う場合はキー設定後 ingest を実行してください。"
+            "RAG 用の認証が無いため Chroma をスキップします（Slack のみ接続確認モード）。"
+            "Bedrock または AI_API_KEY を設定し ingest を実行してください。"
         )
     app, _state = create_app(settings)
     handler = SocketModeHandler(app, settings.slack_app_token)

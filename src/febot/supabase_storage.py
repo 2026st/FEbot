@@ -108,7 +108,7 @@ class SupabaseStorage:
         """Perform vector similarity search.
 
         Args:
-            query_embedding: Query vector (1536 dimensions for text-embedding-3-small)
+            query_embedding: Query vector (dimensions must match `BEDROCK_EMBEDDING_DIMENSIONS`; Titan v2 既定は 1024)
             top_k: Number of results to return
             max_distance: Optional maximum cosine distance threshold
 

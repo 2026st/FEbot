@@ -15,8 +15,11 @@ def test_filter():
     # Load settings
     settings = Settings.load(require_slack=False)
 
-    if not settings.ai_api_key:
-        print("[ERROR] AI_API_KEY is not set. Please set it in .env file.")
+    if not settings.rag_enabled():
+        print(
+            "[ERROR] RAG 用の AI が利用できません。"
+            "Bedrock のときは AWS 認証と BEDROCK_*、OpenAI 互換のみのときは AI_API_KEY を確認してください。"
+        )
         return
 
     # Create filter instance

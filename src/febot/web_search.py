@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from openai import OpenAI
+from febot.llm_backend import ChatEmbedBackend
 
 log = logging.getLogger(__name__)
 
@@ -26,8 +26,8 @@ def search(query: str, max_results: int = 5) -> list[dict]:
         return []
 
 
-def build_answer(oai: OpenAI, model: str, question: str, results: list[dict]) -> tuple[str, str]:
-    """Generate answer from web results using LLM.
+def build_answer(llm: ChatEmbedBackend, question: str, results: list[dict]) -> tuple[str, str]:
+    """Generate answer from web results using the configured LLM backend.
 
     Returns:
         (slack_reply_text, corpus_markdown_to_save)
@@ -41,15 +41,12 @@ def build_answer(oai: OpenAI, model: str, question: str, results: list[dict]) ->
     context = "\n\n---\n\n".join(context_parts)
 
     user_content = f"【質問】\n{question}\n\n【Web検索結果】\n{context}"
-    chat = oai.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SEARCH_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
+    answer_text = llm.chat(
+        SEARCH_SYSTEM_PROMPT,
+        user_content,
         temperature=0.3,
+        max_tokens=None,
     )
-    answer_text = (chat.choices[0].message.content or "").strip()
 
     urls = "\n".join(f"- {r.get('href', '')}" for r in results if r.get("href"))
     corpus_md = f"# Q: {question}\n\n{answer_text}\n\n## 参照URL\n{urls}\n"

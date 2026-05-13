@@ -9,9 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from openai import OpenAI  # noqa: E402
-
 from febot.config import Settings  # noqa: E402
+from febot.llm_backend import get_llm_backend  # noqa: E402
 from febot.supabase_storage import SupabaseStorage  # noqa: E402
 
 CHUNK_SIZE = 900
@@ -48,7 +47,11 @@ def main() -> None:
     settings = Settings.load(require_slack=False)
 
     if not settings.rag_enabled():
-        raise SystemExit("AI_API_KEY が設定されていないため、埋め込み（migrate）は実行できません。")
+        raise SystemExit(
+            "埋め込み（migrate）を実行できません。"
+            "Bedrock 利用時は AWS 認証と BEDROCK_* が揃っていること。"
+            "OpenAI 互換のみの場合は AI_API_KEY を設定してください。"
+        )
 
     if not settings.use_supabase:
         raise SystemExit(
@@ -64,8 +67,7 @@ def main() -> None:
 
     print(f"Found {len(md_files)} markdown files in {settings.corpus_dir}")
 
-    # Initialize clients
-    oai = OpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+    llm = get_llm_backend(settings)
     storage = SupabaseStorage(settings.supabase_url, settings.supabase_key)
 
     total_chunks = 0
@@ -93,9 +95,7 @@ def main() -> None:
 
         for i in range(0, len(chunks), batch_size):
             batch_chunks = chunks[i : i + batch_size]
-            resp = oai.embeddings.create(model=settings.ai_embedding_model, input=batch_chunks)
-            ordered = sorted(resp.data, key=lambda x: x.index)
-            embeddings.extend(item.embedding for item in ordered)
+            embeddings.extend(llm.embed_texts(batch_chunks))
             print(f"  Embedded chunks {i + 1}-{min(i + batch_size, len(chunks))}/{len(chunks)}")
 
         # Save chunks with embeddings to Supabase

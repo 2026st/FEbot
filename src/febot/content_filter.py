@@ -5,9 +5,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from openai import OpenAI
-
 from febot.config import Settings
+from febot.llm_backend import get_llm_backend
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +47,7 @@ class ContentFilter:
 
     def __init__(self, settings: Settings):
         self._settings = settings
-        self._oai = OpenAI(
-            api_key=settings.ai_api_key,
-            base_url=settings.ai_base_url,
-        )
+        self._llm = get_llm_backend(settings)
 
     def validate(self, question: str) -> FilterResult:
         """
@@ -74,17 +70,14 @@ class ContentFilter:
         try:
             logger.info(f"Validating question: {question[:100]}...")
 
-            response = self._oai.chat.completions.create(
-                model=self._settings.ai_chat_model,
-                messages=[
-                    {"role": "system", "content": FILTER_SYSTEM_PROMPT},
-                    {"role": "user", "content": question},
-                ],
+            result_text = self._llm.chat(
+                FILTER_SYSTEM_PROMPT,
+                question,
                 temperature=0.0,
                 max_tokens=10,
             )
 
-            result = (response.choices[0].message.content or "").strip().upper()
+            result = result_text.strip().upper()
             logger.info(f"Filter result: {result}")
 
             if "OK" in result:

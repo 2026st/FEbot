@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chunk corpus Markdown, embed with OpenAI-compatible API, persist Chroma."""
+"""Chunk corpus Markdown, embed (Bedrock Titan or OpenAI-compatible), persist Chroma."""
 
 from __future__ import annotations
 
@@ -11,9 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from openai import OpenAI  # noqa: E402
-
 from febot.config import Settings  # noqa: E402
+from febot.llm_backend import get_llm_backend  # noqa: E402
 from febot.rag import COLLECTION  # noqa: E402
 
 CHUNK_SIZE = 900
@@ -49,7 +48,11 @@ def main() -> None:
 
     settings = Settings.load(require_slack=False)
     if not settings.rag_enabled():
-        raise SystemExit("AI_API_KEY が設定されていないため、埋め込み（ingest）は実行できません。")
+        raise SystemExit(
+            "埋め込み（ingest）を実行できません。"
+            "Bedrock 利用時は AWS 認証と BEDROCK_* が揃っていること。"
+            "OpenAI 互換のみの場合は AI_API_KEY を設定してください。"
+        )
     if not settings.corpus_dir.is_dir():
         raise SystemExit(f"CORPUS_DIR not found: {settings.corpus_dir}")
 
@@ -65,7 +68,7 @@ def main() -> None:
     if not all_chunks:
         raise SystemExit("No chunks produced")
 
-    client = OpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+    llm = get_llm_backend(settings)
     texts = [c[0] for c in all_chunks]
     metas = [c[1] for c in all_chunks]
 
@@ -73,9 +76,7 @@ def main() -> None:
     embeddings: list[list[float]] = []
     for i in range(0, len(texts), batch):
         batch_texts = texts[i : i + batch]
-        resp = client.embeddings.create(model=settings.ai_embedding_model, input=batch_texts)
-        ordered = sorted(resp.data, key=lambda x: x.index)
-        embeddings.extend(item.embedding for item in ordered)
+        embeddings.extend(llm.embed_texts(batch_texts))
 
     settings.chroma_path.parent.mkdir(parents=True, exist_ok=True)
     chroma = chromadb.PersistentClient(path=str(settings.chroma_path))

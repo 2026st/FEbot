@@ -31,11 +31,11 @@
 - **言語**: Python 3.10 以上（`pyproject.toml` の `requires-python` に準拠。`X | Y` 型表記のため 3.9 非対応）
 - **Slack**: [slack-bolt](https://slack.dev/bolt-python/)（**Socket Mode**）
 - **ベクトルDB**: Chroma（ローカル永続、`CHROMA_PATH`）
-- **LLM / 埋め込み**: **OpenAI 互換 API**（`openai` クライアント）。`AI_API_KEY` と任意の `AI_BASE_URL`（Azure 等）
+- **LLM / 埋め込み**: **Amazon Bedrock** または **OpenAI 互換 API**（`openai` クライアント）。`BEDROCK_CHAT_MODEL_ID` と `BEDROCK_EMBEDDING_MODEL_ID` の**両方**を環境に設定すると Bedrock、それ以外は `AI_API_KEY`（`USE_BEDROCK` で上書き可。詳細は `.env.example`）
 - **Web 検索フォールバック**: `ddgs`（DuckDuckGo、API キー不要）
 - **コーパス**: `data/corpus/*.md`。オリジナル教材に加え、IPA 公表 PDF から抽出した `ipa-*.md` を想定。利用上の留意点は [IPA FAQ（試験制度・その他）](https://www.ipa.go.jp/shiken/faq.html#seido) を確認すること。PDF の再取得・テキスト再生成は `python3 scripts/ipa_build_corpus.py --fetch`（詳細は [docs/20260405-ipa-corpus.md](docs/20260405-ipa-corpus.md)）。
 
-補足: リポジトリには Bedrock 向けの `src/febot/llm.py` と移行メモ [docs/20260416-bedrock-migration.md](docs/20260416-bedrock-migration.md) があるが、**現行の `config.py` / `rag.py` / `scripts/ingest.py` は OpenAI 互換 API 前提**で、`llm.py` は応答パイプラインに未接続である。
+OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/20260513-bedrock-openai-replacement.md](docs/20260513-bedrock-openai-replacement.md) を参照。
 
 ## セットアップ・起動
 
@@ -64,12 +64,12 @@
    - `SLACK_TOKEN` … Bot User OAuth Token（`xoxb-`）
    - `SLACK_APP_TOKEN` … App-Level Token（Socket Mode 用、`xapp-`）
 
-   **RAG・ingest・Web 要約（OpenAI 互換 API）**
+   **RAG・ingest・Web 要約（Bedrock または OpenAI 互換）**
 
-   - `AI_API_KEY` … 未設定の場合、Slack 接続・`/fe-help`・練習問題は動くが **埋め込み検索による回答と ingest は無効**
-   - `AI_BASE_URL` … 省略時は OpenAI 公式。Azure 等はベース URL を指定
-   - `AI_CHAT_MODEL` … 既定 `gpt-4o-mini`
-   - `AI_EMBEDDING_MODEL` … 既定 `text-embedding-3-small`
+   - **バックエンドの優先**: `BEDROCK_CHAT_MODEL_ID` と `BEDROCK_EMBEDDING_MODEL_ID` を**ともに**設定 → Bedrock。`USE_BEDROCK` を `false` にすると OpenAI 互換に強制、`true` にすると両モデル ID を省略しても既定で Bedrock。
+   - **Bedrock 時**: AWS 認証（`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`、プロファイル、IAM ロール等）、`AWS_REGION` または `AWS_DEFAULT_REGION`（既定 `ap-northeast-1`）、`BEDROCK_CHAT_MODEL_ID`、`BEDROCK_EMBEDDING_MODEL_ID`、`BEDROCK_EMBEDDING_DIMENSIONS`（Titan v2、既定 `1024`）。IAM の例: `bedrock:InvokeModel`、Converse 利用時は `bedrock:Converse`。
+   - **OpenAI 互換時（上記2つの Bedrock モデル ID が無い場合）**: `AI_API_KEY`、任意で `AI_BASE_URL`、`AI_CHAT_MODEL`（既定 `gpt-4o-mini`）、`AI_EMBEDDING_MODEL`（既定 `text-embedding-3-small`）
+   - **埋め込み次元**: Bedrock（Titan）と OpenAI でベクトル次元が異なる。**モデルやプロバイダを変えたら `ingest` を再実行**すること。
 
    **任意（パス・検索チューニング）**
 
@@ -83,12 +83,20 @@
    - `CONTENT_FILTER_ENABLED` … コンテンツフィルターの有効/無効（既定 `true`。IT・プログラミング関連以外の質問をフィルタリング）
    - `SUPABASE_URL` / `SUPABASE_KEY` … Supabase 移行スクリプト利用時に必要（通常運用では任意）
 
-   最小例（OpenAI 互換）:
+   最小例（Bedrock・ローカルでキーを使う場合。本番は IAM ロール推奨）:
+
+   ```bash
+   AWS_REGION=ap-northeast-1
+   AWS_ACCESS_KEY_ID=...
+   AWS_SECRET_ACCESS_KEY=...
+   BEDROCK_CHAT_MODEL_ID=anthropic.claude-sonnet-4-6
+   BEDROCK_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
+   ```
+
+   最小例（OpenAI 互換のみ）:
 
    ```bash
    AI_API_KEY=sk-...
-   AI_CHAT_MODEL=gpt-4o-mini
-   AI_EMBEDDING_MODEL=text-embedding-3-small
    ```
 
 3. （任意）IPA 由来コーパスを公式サイトから取り直す場合は、ネットワークのある環境で次を実行する。生成物は `data/corpus/ipa-*.md`（`data/ipa_raw/` は `.gitignore` 対象）。
@@ -97,7 +105,7 @@
    python3 scripts/ipa_build_corpus.py --fetch
    ```
 
-4. RAG を使う場合は、`AI_API_KEY` 設定後にコーパスを埋め込み、Chroma を生成する。
+4. RAG を使う場合は、選択したバックエンド（Bedrock なら AWS 認証＋モデル、OpenAI 互換なら `AI_API_KEY`）が揃ったうえで、コーパスを埋め込み Chroma を生成する（**プロバイダや埋め込みモデルを変えたら再 ingest が必要**）。
 
    ```bash
    python3 scripts/ingest.py
@@ -146,7 +154,7 @@ python3 -m pytest
 
 - **チャンネル**: ボットに **メンション**して質問。キーワード「過去問」「出題」「練習問題」で `sample-questions.md` から問題を出題し、**スレッド**で「ア」「イ」「ウ」「エ」に返信すると正誤と解説。
 - **DM**: メンション不要。上記キーワードと RAG 質問が同様に使える。
-- **RAG**: Chroma で類似チャンクを取得（距離しきい値・`glossary.md` ブーストあり）。LLM が「参照抜粋にない」と判断した場合や、検索ヒットが無い場合は **Web 検索フォールバック**に進み、取得内容をコーパスに追記してから回答する。
+- **RAG**: Chroma で類似チャンクを取得（距離しきい値・`glossary.md` ブーストあり）。埋め込みモデルを変えた場合は `RAG_MAX_DISTANCE` の再調整が必要になることがある。LLM が「参照抜粋にない」と判断した場合や、検索ヒットが無い場合は **Web 検索フォールバック**に進み、取得内容をコーパスに追記してから回答する。
 
 ## Slack アプリ側（概要）
 

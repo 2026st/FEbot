@@ -1,4 +1,4 @@
-"""Retrieve from Chroma/Supabase and answer with OpenAI-compatible chat API."""
+"""Retrieve from Chroma/Supabase and answer via Bedrock or OpenAI-compatible API."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import chromadb
-from openai import OpenAI
 
 from febot.config import Settings
+from febot.llm_backend import get_llm_backend
 from febot.supabase_storage import SupabaseStorage
 
 COLLECTION = "febot_corpus"
@@ -156,7 +156,7 @@ class RateLimiter:
 class RagEngine:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._oai = OpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+        self.llm = get_llm_backend(settings)
 
         # Use Supabase if configured, otherwise fall back to Chroma
         if settings.use_supabase:
@@ -179,11 +179,7 @@ class RagEngine:
                 sources=[],
             )
 
-        q_emb = self._oai.embeddings.create(
-            model=self._settings.ai_embedding_model,
-            input=[question],
-        )
-        query_vector = q_emb.data[0].embedding
+        query_vector = self.llm.embed_texts([question])[0]
 
         # Use Supabase or Chroma based on configuration
         if self._storage:
@@ -273,15 +269,12 @@ class RagEngine:
 
         user_content = f"【ユーザーの質問】\n{question}\n\n【参照抜粋】\n{context}"
 
-        chat = self._oai.chat.completions.create(
-            model=self._settings.ai_chat_model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
+        text = self.llm.chat(
+            SYSTEM_PROMPT,
+            user_content,
             temperature=0.2,
+            max_tokens=None,
         )
-        text = (chat.choices[0].message.content or "").strip()
         # LLM explicitly said the corpus has no relevant info → fall through to web search
         if "参照抜粋にありません" in text:
             return None
@@ -299,11 +292,7 @@ class RagEngine:
 
         texts = [c[0] for c in chunks]
 
-        resp = self._oai.embeddings.create(
-            model=self._settings.ai_embedding_model,
-            input=texts,
-        )
-        embeddings = [e.embedding for e in sorted(resp.data, key=lambda x: x.index)]
+        embeddings = self.llm.embed_texts(texts)
 
         if self._storage:
             # Save to Supabase
