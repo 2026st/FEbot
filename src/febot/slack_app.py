@@ -16,7 +16,15 @@ from febot import web_search as ws
 from febot.bedrock_errors import slack_reply_for_bedrock_access_error
 from febot.config import Settings
 from febot.content_filter import ContentFilter
-from febot.quiz import QuizItem, load_quiz_items, pick_random
+from febot.quiz import (
+    KNOWN_CATEGORIES,
+    KNOWN_FIELDS,
+    QuizItem,
+    load_quiz_items,
+    normalize_answer,
+    pick_filtered,
+    pick_random,
+)
 from febot.rag import RagEngine
 from febot.slack_handlers import (
     ProcessedEvents,
@@ -55,6 +63,12 @@ def _help_text(settings: Settings) -> str:
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
         "• コーパスには IPA 公表 PDF から抽出した `ipa-*.md` とオリジナル教材があります。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
+        "\n*スラッシュコマンド*\n"
+        "• `/fe-quiz` — 全問からランダム出題\n"
+        "• `/fe-quiz 科目A` または `/fe-quiz a` — 科目A（知識問題）から出題\n"
+        "• `/fe-quiz 科目B` または `/fe-quiz b` — 科目B（アルゴリズム）から出題\n"
+        "• `/fe-quiz ネットワーク` など — 分野名で絞り込み出題\n"
+        "  （分野例: OS、ネットワーク、データベース、セキュリティ、アルゴリズム、表計算）\n"
     )
     if not settings.rag_enabled():
         return base + (
@@ -268,6 +282,33 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
     def fe_help(ack, respond):
         ack()
         respond(_help_text(settings))
+
+    @app.command("/fe-quiz")
+    def fe_quiz_cmd(ack, command, client, respond, logger):
+        ack()
+        option = (command.get("text") or "").strip()
+        item = pick_filtered(state.quiz_items, option)
+        if not item:
+            if option:
+                fields_hint = "、".join(KNOWN_FIELDS)
+                cats_hint = "、".join(KNOWN_CATEGORIES)
+                respond(
+                    f"「{option}」に一致する問題が見つかりませんでした。\n"
+                    f"*カテゴリ指定*: {cats_hint}\n"
+                    f"*分野指定*: {fields_hint}"
+                )
+            else:
+                respond("練習問題データが見つかりません。")
+            return
+        channel_id = command["channel_id"]
+        try:
+            result = client.chat_postMessage(channel=channel_id, text=_format_quiz(item))
+            ts = result.get("ts")
+            if ts:
+                state.pending_quiz[ts] = item
+        except Exception as e:
+            logger.exception("fe_quiz_cmd chat_postMessage failed: %s", e)
+            respond("問題の投稿中にエラーが発生しました。")
 
     @app.event("app_mention")
     def on_mention(event, say, logger):
