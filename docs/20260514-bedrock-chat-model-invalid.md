@@ -28,6 +28,7 @@ Slack ボットで質問すると、`febot.content_filter` や `febot.slack_app`
 
 - **`AWS_REGION` / `AWS_DEFAULT_REGION`** が、利用するモデルが載っているリージョンと一致しているか。
 - Bedrock コンソールで対象モデルの **アクセス（オンデマンド等）が有効**か。アクセス不足の場合は別メッセージ（例: `AccessDeniedException`）になりやすいが、運用で混同しないようコンソールも確認する。
+- `jp.*` プロファイル利用時に `aws-marketplace:ViewSubscriptions` がログに出る場合は、モデル ID ではなく **IAM（Marketplace）** の問題。[Marketplace と AccessDenied](./20260514-bedrock-marketplace-access.md) を参照。
 - `.env` の値に **余計な引用符**が含まれていないか（実装では先頭末尾の `'` / `"` を1重だけ除去する）。
 
 ## 関連ドキュメント

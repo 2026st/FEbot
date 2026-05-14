@@ -67,7 +67,7 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    **RAG・ingest・Web 要約（Bedrock または OpenAI 互換）**
 
    - **バックエンドの優先**: `USE_BEDROCK=true`、または `BEDROCK_CHAT_MODEL_ID` を設定するとチャットは Bedrock。`USE_BEDROCK=false` で OpenAI 互換のみに固定。
-   - **Bedrock（チャット）時**: AWS 認証、`AWS_REGION` または `AWS_DEFAULT_REGION`（既定 `ap-northeast-1`）、`BEDROCK_CHAT_MODEL_ID`（未設定時の既定は `anthropic.claude-3-5-haiku-20241022-v1:0`）。IAM の例: `bedrock:InvokeModel`、Converse 利用時は `bedrock:Converse`。**加えて埋め込み用に `AI_API_KEY`（および任意で `AI_BASE_URL`・`AI_EMBEDDING_MODEL`）が必須。** 東京リージョンで Claude Sonnet 4.6 など **geo 推論**のみの場合は、AWS のモデルカードに従い `BEDROCK_CHAT_MODEL_ID=jp.anthropic.claude-sonnet-4-6` のように **jp. 付き inference profile ID** を指定する（詳細は [docs/20260514-bedrock-chat-model-invalid.md](docs/20260514-bedrock-chat-model-invalid.md)）。
+   - **Bedrock（チャット）時**: AWS 認証、`AWS_REGION` または `AWS_DEFAULT_REGION`（既定 `ap-northeast-1`）、`BEDROCK_CHAT_MODEL_ID`（未設定時の既定は `anthropic.claude-3-5-haiku-20241022-v1:0`）。IAM の例: `bedrock:InvokeModel`、Converse 利用時は `bedrock:Converse`。**加えて埋め込み用に `AI_API_KEY`（および任意で `AI_BASE_URL`・`AI_EMBEDDING_MODEL`）が必須。** 東京リージョンで Claude Sonnet 4.6 など **geo 推論**のみの場合は、AWS のモデルカードに従い `BEDROCK_CHAT_MODEL_ID=jp.anthropic.claude-sonnet-4-6` のように **jp. 付き inference profile ID** を指定できるが、この場合は **AWS Marketplace 向け IAM**（`ViewSubscriptions` / `Subscribe`）が追加で必要になることがある（詳細は [docs/20260514-bedrock-chat-model-invalid.md](docs/20260514-bedrock-chat-model-invalid.md)、[docs/20260514-bedrock-marketplace-access.md](docs/20260514-bedrock-marketplace-access.md)）。
    - **OpenAI 互換のみ（Bedrock 未使用）**: `AI_API_KEY`、任意で `AI_BASE_URL`、`AI_CHAT_MODEL`（既定 `gpt-4o-mini`）、`AI_EMBEDDING_MODEL`（既定 `text-embedding-3-small`）
    - **埋め込み次元**: `AI_EMBEDDING_MODEL` を変えたら Chroma / pgvector の次元と一致させる。**モデルを変えたら `ingest` を再実行**すること。
 
@@ -81,6 +81,7 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    - `RATE_LIMIT_PER_MINUTE` … Slack ユーザーあたりの RAG 呼び出し上限（既定 `20`）
    - `WEB_SEARCH_MAX_RESULTS` … Web 検索の最大件数（既定 `5`）
    - `CONTENT_FILTER_ENABLED` … コンテンツフィルターの有効/無効（既定 `true`。IT・プログラミング関連以外の質問をフィルタリング）
+   - `BEDROCK_CHAT_SKIP_CONVERSE` … `true` のときチャットは `InvokeModel` のみ（`Converse` を試さない。既定 `false`）
    - `SUPABASE_URL` / `SUPABASE_KEY` … Supabase 移行スクリプト利用時に必要（通常運用では任意）
 
    最小例（Bedrock チャット＋OpenAI 埋め込み。本番は IAM ロール推奨）:

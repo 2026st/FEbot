@@ -52,6 +52,7 @@ class Settings:
     bedrock_chat_model_id: str
     bedrock_embedding_model_id: str
     bedrock_embedding_dimensions: int
+    bedrock_chat_skip_converse: bool
     ai_api_key: str
     ai_base_url: str | None
     ai_chat_model: str
@@ -111,6 +112,10 @@ class Settings:
             "CONTENT_FILTER_ENABLED", "true"
         ).strip().lower() in ("true", "1", "yes")
 
+        bedrock_chat_skip_converse = os.environ.get(
+            "BEDROCK_CHAT_SKIP_CONVERSE", ""
+        ).strip().lower() in ("true", "1", "yes")
+
         return Settings(
             slack_token=slack_token,
             slack_app_token=slack_app_token,
@@ -119,6 +124,7 @@ class Settings:
             bedrock_chat_model_id=chat_model,
             bedrock_embedding_model_id=embed_model,
             bedrock_embedding_dimensions=embed_dims,
+            bedrock_chat_skip_converse=bedrock_chat_skip_converse,
             ai_api_key=ai_key,
             ai_base_url=base,
             ai_chat_model=ai_chat,
