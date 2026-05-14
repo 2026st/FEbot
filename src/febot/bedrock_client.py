@@ -68,7 +68,9 @@ class BedrockClient:
     ) -> str:
         """Run Claude on Bedrock; prefer Converse, fall back to InvokeModel."""
         try:
-            return self._chat_via_converse(system, user, temperature=temperature, max_tokens=max_tokens)
+            return self._chat_via_converse(
+                system, user, temperature=temperature, max_tokens=max_tokens
+            )
         except ClientError as e:
             err_code = e.response.get("Error", {}).get("Code", "")
             if err_code == "AccessDeniedException":

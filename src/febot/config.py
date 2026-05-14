@@ -24,6 +24,14 @@ def _aws_credentials_available() -> bool:
         return False
 
 
+def _strip_bedrock_chat_model_id(raw: str) -> str:
+    """Strip whitespace and a single matching pair of outer ' or \" from .env values."""
+    s = raw.strip()
+    if len(s) >= 2 and s[0] in "\"'" and s[0] == s[-1]:
+        return s[1:-1].strip()
+    return s
+
+
 def _should_use_bedrock() -> bool:
     """True if USE_BEDROCK is enabled, or BEDROCK_CHAT_MODEL_ID is set (chat on Bedrock; embed uses OpenAI API)."""
     raw = os.environ.get("USE_BEDROCK", "").strip().lower()
@@ -31,7 +39,7 @@ def _should_use_bedrock() -> bool:
         return False
     if raw in ("1", "true", "yes"):
         return True
-    chat = os.environ.get("BEDROCK_CHAT_MODEL_ID", "").strip()
+    chat = _strip_bedrock_chat_model_id(os.environ.get("BEDROCK_CHAT_MODEL_ID", ""))
     return bool(chat)
 
 
@@ -76,9 +84,10 @@ class Settings:
             or os.environ.get("AWS_DEFAULT_REGION", "").strip()
             or "ap-northeast-1"
         )
+        # In-region default for ap-northeast-1; Sonnet 4.x may need geo IDs (e.g. jp.*) — see README / docs.
         chat_model = (
-            os.environ.get("BEDROCK_CHAT_MODEL_ID", "").strip()
-            or "anthropic.claude-sonnet-4-6"
+            _strip_bedrock_chat_model_id(os.environ.get("BEDROCK_CHAT_MODEL_ID", ""))
+            or "anthropic.claude-3-5-haiku-20241022-v1:0"
         )
         embed_model = (
             os.environ.get("BEDROCK_EMBEDDING_MODEL_ID", "").strip()
