@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from openai import OpenAI
 
 from febot.bedrock_client import BedrockClient
 from febot.config import Settings
+
+log = logging.getLogger(__name__)
 
 
 class ChatEmbedBackend(Protocol):
@@ -49,10 +52,20 @@ class OpenAICompatBackend:
         }
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+        log.info(
+            "使用AI chat: provider=openai-compatible model=%s base_url=%s",
+            self._chat_model,
+            str(self._client.base_url).rstrip("/"),
+        )
         response = self._client.chat.completions.create(**kwargs)
         return (response.choices[0].message.content or "").strip()
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        log.info(
+            "使用AI embed: provider=openai-compatible model=%s texts=%d",
+            self._embed_model,
+            len(texts),
+        )
         resp = self._client.embeddings.create(model=self._embed_model, input=texts)
         return [e.embedding for e in sorted(resp.data, key=lambda x: x.index)]
 

@@ -29,6 +29,11 @@ class BedrockClient:
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Titan Text Embeddings V2: one InvokeModel call per input string."""
+        log.info(
+            "使用AI embed: provider=bedrock model_id=%s texts=%d",
+            self._embed_model_id,
+            len(texts),
+        )
         out: list[list[float]] = []
         for t in texts:
             body = json.dumps(
@@ -68,6 +73,7 @@ class BedrockClient:
         max_tokens: int | None,
     ) -> str:
         """Run Claude on Bedrock; prefer Converse, fall back to InvokeModel."""
+        log.info("使用AI chat: provider=bedrock model_id=%s", self._chat_model_id)
         if self._skip_converse:
             return self._chat_via_invoke(
                 system, user, temperature=temperature, max_tokens=max_tokens
