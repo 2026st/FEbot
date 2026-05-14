@@ -13,6 +13,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from febot import web_search as ws
+from febot.bedrock_errors import slack_reply_for_bedrock_access_error
 from febot.config import Settings
 from febot.content_filter import ContentFilter
 from febot.quiz import QuizItem, load_quiz_items, normalize_answer, pick_random
@@ -103,7 +104,11 @@ def _handle_rag_question(
         out = rag.answer(user_id, text)
     except Exception as e:
         log.exception("rag failed: %s", e)
-        say("処理中にエラーが発生しました。管理者に連絡してください。", **kwargs)
+        msg = slack_reply_for_bedrock_access_error(e)
+        say(
+            msg or "処理中にエラーが発生しました。管理者に連絡してください。",
+            **kwargs,
+        )
         return
 
     if out is not None:

@@ -1,5 +1,7 @@
 # Bedrock と OpenAI 互換 API の使い分け（2026-05-13）
 
+`ValidationException: The provided model identifier is invalid` のときは [Bedrock チャット用モデル ID のトラブルシュート](./20260514-bedrock-chat-model-invalid.md) を参照。`AccessDeniedException` で `aws-marketplace:ViewSubscriptions` / `Subscribe` が出る場合は [Marketplace IAM と geo profile](./20260514-bedrock-marketplace-access.md) を参照。
+
 ## 意図
 
 チャットは **Amazon Bedrock** または **OpenAI 互換 API** を環境で切り替える。**埋め込み（ingest・RAG のクエリベクトル）は常に OpenAI 互換 API**（`openai` クライアント、`AI_API_KEY`）を使う。Bedrock でチャットする構成でも Titan 等の Bedrock 埋め込みは使わない。
@@ -13,7 +15,7 @@
 | 上記以外で `BEDROCK_CHAT_MODEL_ID` が非空 | Bedrock | OpenAI 互換 |
 | 上記以外 | OpenAI 互換 | OpenAI 互換 |
 
-`rag_enabled()` が True になるには、**常に `AI_API_KEY` が必要**。Bedrock 利用時はさらに AWS 認証が解決でき、`BEDROCK_CHAT_MODEL_ID`（または `USE_BEDROCK=true` 時の既定）が揃っていること。
+`rag_enabled()` が True になるには、**常に `AI_API_KEY` が必要**。Bedrock 利用時はさらに AWS 認証が解決でき、`BEDROCK_CHAT_MODEL_ID`（または `USE_BEDROCK=true` 時の既定 `anthropic.claude-3-5-haiku-20241022-v1:0`）が揃っていること。
 
 ## 環境変数（参照）
 
@@ -28,7 +30,7 @@
 ## 移行手順
 
 1. AWS 側でチャットモデルの **オンデマンドアクセス**（または利用可能な購入済みスループット）を有効化する。
-2. 実行主体に `bedrock:InvokeModel` および `bedrock:Converse`（利用する場合）を付与する。
+2. 実行主体に `bedrock:InvokeModel` および `bedrock:Converse`（利用する場合）を付与する。`jp.anthropic.*` など **geo inference profile** を使う場合は、追加で [Marketplace 向け IAM](./20260514-bedrock-marketplace-access.md) が必要になることがある。
 3. `.env` に [`.env.example`](../.env.example) に沿って AWS と `BEDROCK_CHAT_MODEL_ID` を設定し、**埋め込み用に `AI_API_KEY`** を設定する。
 4. **Chroma の再生成**: 旧 Titan（1024 次元）などと `AI_EMBEDDING_MODEL` の次元が異なる場合は `python3 scripts/ingest.py` を再実行する。
 5. **距離しきい値**: `RAG_MAX_DISTANCE` はベクトル空間に依存する。回答品質が変わったら調整する。

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from febot.bedrock_errors import is_marketplace_access_denied
 from febot.config import Settings
 from febot.llm_backend import get_llm_backend
 
@@ -89,7 +90,13 @@ class ContentFilter:
                 )
 
         except Exception as e:
-            logger.error(f"Content filter error: {e}", exc_info=True)
+            if is_marketplace_access_denied(e):
+                logger.warning(
+                    "Content filter: Bedrock unavailable (Marketplace IAM on chat model). fail-open: %s",
+                    e,
+                )
+            else:
+                logger.error("Content filter error: %s", e, exc_info=True)
             # Fail open: allow the question if filter fails
             return FilterResult(
                 is_valid=True,

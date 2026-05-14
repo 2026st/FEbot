@@ -25,9 +25,15 @@ class BedrockClient:
         self._chat_model_id = settings.bedrock_chat_model_id
         self._embed_model_id = settings.bedrock_embedding_model_id
         self._embed_dimensions = settings.bedrock_embedding_dimensions
+        self._skip_converse = settings.bedrock_chat_skip_converse
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Titan Text Embeddings V2: one InvokeModel call per input string."""
+        log.info(
+            "使用AI embed: provider=bedrock model_id=%s texts=%d",
+            self._embed_model_id,
+            len(texts),
+        )
         out: list[list[float]] = []
         for t in texts:
             body = json.dumps(
@@ -67,12 +73,22 @@ class BedrockClient:
         max_tokens: int | None,
     ) -> str:
         """Run Claude on Bedrock; prefer Converse, fall back to InvokeModel."""
+        log.info("使用AI chat: provider=bedrock model_id=%s", self._chat_model_id)
+        if self._skip_converse:
+            return self._chat_via_invoke(
+                system, user, temperature=temperature, max_tokens=max_tokens
+            )
         try:
-            return self._chat_via_converse(system, user, temperature=temperature, max_tokens=max_tokens)
+            return self._chat_via_converse(
+                system, user, temperature=temperature, max_tokens=max_tokens
+            )
         except ClientError as e:
             err_code = e.response.get("Error", {}).get("Code", "")
             if err_code == "AccessDeniedException":
-                raise
+                log.warning("Bedrock Converse AccessDenied, trying InvokeModel (same model): %s", e)
+                return self._chat_via_invoke(
+                    system, user, temperature=temperature, max_tokens=max_tokens
+                )
             log.warning("Bedrock Converse failed (%s), trying InvokeModel: %s", err_code, e)
         except Exception as e:
             log.warning("Bedrock Converse failed, trying InvokeModel: %s", e)
