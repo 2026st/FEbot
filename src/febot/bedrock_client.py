@@ -85,9 +85,7 @@ class BedrockClient:
         except ClientError as e:
             err_code = e.response.get("Error", {}).get("Code", "")
             if err_code == "AccessDeniedException":
-                log.warning(
-                    "Bedrock Converse AccessDenied, trying InvokeModel (same model): %s", e
-                )
+                log.warning("Bedrock Converse AccessDenied, trying InvokeModel (same model): %s", e)
                 return self._chat_via_invoke(
                     system, user, temperature=temperature, max_tokens=max_tokens
                 )
