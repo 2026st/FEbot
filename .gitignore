@@ -10,3 +10,4 @@ data/chroma/
 data/ipa_raw/
 .DS_Store
 .cursor/
+.claudecodeconfig
