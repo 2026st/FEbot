@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 
 from febot.llm_backend import ChatEmbedBackend
+from febot.thread_session import ChatTurn, build_user_content_with_history
 
 log = logging.getLogger(__name__)
 
 SEARCH_SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
 以下のWeb検索結果をもとに、ユーザーの質問に日本語で簡潔に答えてください。
+【これまでの会話】があるときはその文脈を踏まえ、直近の質問に答えてください。
 情報が不十分な場合はその旨を伝えてください。
 回答の末尾に【出典URL】として参照したURLを箇条書きで記載してください。"""
 
@@ -26,7 +28,13 @@ def search(query: str, max_results: int = 5) -> list[dict]:
         return []
 
 
-def build_answer(llm: ChatEmbedBackend, question: str, results: list[dict]) -> tuple[str, str]:
+def build_answer(
+    llm: ChatEmbedBackend,
+    question: str,
+    results: list[dict],
+    *,
+    history: list[ChatTurn] | None = None,
+) -> tuple[str, str]:
     """Generate answer from web results using the configured LLM backend.
 
     Returns:
@@ -40,7 +48,13 @@ def build_answer(llm: ChatEmbedBackend, question: str, results: list[dict]) -> t
         context_parts.append(f"タイトル: {title}\nURL: {url}\n内容: {body}")
     context = "\n\n---\n\n".join(context_parts)
 
-    user_content = f"【質問】\n{question}\n\n【Web検索結果】\n{context}"
+    user_content = build_user_content_with_history(
+        question=question,
+        context=context,
+        history=history,
+        question_heading="【質問】",
+        context_heading="【Web検索結果】",
+    )
     answer_text = llm.chat(
         SEARCH_SYSTEM_PROMPT,
         user_content,

@@ -15,6 +15,7 @@ import chromadb
 from febot.config import Settings
 from febot.llm_backend import get_llm_backend
 from febot.supabase_storage import SupabaseStorage
+from febot.thread_session import ChatTurn, build_user_content_with_history
 
 COLLECTION = "febot_corpus"
 GLOSSARY_FILE = "glossary.md"
@@ -24,6 +25,7 @@ CHUNK_OVERLAP = 120
 
 SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
 与えられた【参照抜粋】のみを根拠に、簡潔に日本語で答えてください。
+【これまでの会話】があるときはその文脈を踏まえ、直近の【ユーザーの質問】に答えてください。
 参照抜粋に質問への答えが含まれない場合は推測せず、「この質問に答える記述は参照抜粋にありません」と述べてください。
 「glossary.md（用語マッチ）」の節があるときは、用語説明の質問ではそれを最優先の根拠にしてください。
 試験の正式な出題やIPA公式の解釈を断定しないでください。"""
@@ -33,6 +35,18 @@ SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支�
 class RagAnswer:
     text: str
     sources: list[str]
+
+
+def build_rag_user_content(
+    question: str,
+    context: str,
+    history: list[ChatTurn] | None = None,
+) -> str:
+    return build_user_content_with_history(
+        question=question,
+        context=context,
+        history=history,
+    )
 
 
 def _chunk_text(text: str, source: str) -> list[tuple[str, dict[str, str]]]:
@@ -171,7 +185,13 @@ class RagEngine:
         self.limiter = RateLimiter(settings.rate_limit_per_minute)
         self._glossary_sections = _load_glossary_sections(settings.corpus_dir)
 
-    def answer(self, user_id: str, question: str) -> RagAnswer | None:
+    def answer(
+        self,
+        user_id: str,
+        question: str,
+        *,
+        history: list[ChatTurn] | None = None,
+    ) -> RagAnswer | None:
         """Answer from corpus. Returns None if no relevant knowledge found (triggers web search fallback)."""
         if not self.limiter.allow(user_id):
             return RagAnswer(
@@ -267,7 +287,7 @@ class RagEngine:
 
         context = "\n\n".join(parts) if parts else "（参照なし）"
 
-        user_content = f"【ユーザーの質問】\n{question}\n\n【参照抜粋】\n{context}"
+        user_content = build_rag_user_content(question, context, history)
 
         text = self.llm.chat(
             SYSTEM_PROMPT,
