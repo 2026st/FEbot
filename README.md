@@ -84,6 +84,8 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    - `THREAD_HISTORY_MAX_TURNS` … スレッドあたりの会話履歴保持件数（既定 `10`。ボット再起動で消える）
    - `THREAD_MAX_SESSIONS` … インメモリで保持するスレッドセッション数の上限（既定 `500`）
    - `BEDROCK_CHAT_SKIP_CONVERSE` … `true` のときチャットは `InvokeModel` のみ（`Converse` を試さない。既定 `false`）
+   - `BEDROCK_EMBEDDING_MODEL_ID` … Bedrock で埋め込みを行う場合のモデル ID（既定は OpenAI 互換 API を使用。例: `amazon.titan-embed-text-v2:0`）
+   - `BEDROCK_EMBEDDING_DIMENSIONS` … Bedrock 埋め込みの次元数（既定 `1024`）
    - `SUPABASE_URL` / `SUPABASE_KEY` … Supabase 移行スクリプト利用時に必要（通常運用では任意）
 
    最小例（Bedrock チャット＋OpenAI 埋め込み。本番は IAM ロール推奨）:
