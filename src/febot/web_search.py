@@ -10,10 +10,9 @@ from febot.thread_session import ChatTurn, build_user_content_with_history
 log = logging.getLogger(__name__)
 
 SEARCH_SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
-以下のWeb検索結果をもとに、ユーザーの質問に日本語で簡潔に答えてください。
-【これまでの会話】があるときはその文脈を踏まえ、直近の質問に答えてください。
+以下のWeb検索結果をもとに、ユーザーの質問に日本語で初学者でも分かるように丁寧に答えてください。
 情報が不十分な場合はその旨を伝えてください。
-回答の末尾に【出典URL】として参照したURLを箇条書きで記載してください。"""
+回答の末尾に【出典URL】として参照したURLを箇条書きで記載してください。ただし、出典URLがない場合は記載しないでください。"""
 
 
 def search(query: str, max_results: int = 5) -> list[dict]:
