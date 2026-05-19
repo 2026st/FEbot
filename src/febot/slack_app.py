@@ -21,7 +21,6 @@ from febot.quiz import (
     KNOWN_FIELDS,
     QuizItem,
     load_quiz_items,
-    normalize_answer,
     pick_filtered,
     pick_random,
 )

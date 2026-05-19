@@ -34,7 +34,7 @@ class QuizItem:
     correct: str
     explanation: str
     category: str = ""  # "科目A" | "科目B" | ""
-    field: str = ""     # e.g. "OS", "ネットワーク", "" (empty for IPA questions)
+    field: str = ""  # e.g. "OS", "ネットワーク", "" (empty for IPA questions)
 
 
 def _field_from_qid(qid: str) -> str:
@@ -121,7 +121,7 @@ def _parse_ipa_kamoku_a(qs_path: Path, ans_path: Path, source_label: str) -> lis
             continue
 
         body = re.sub(r"^問\d+\s+", "", block[: choice_m.start()]).strip()
-        choices_raw = block[choice_m.start():].strip()
+        choices_raw = block[choice_m.start() :].strip()
         # Ensure each choice option starts on its own line
         choices_fmt = re.sub(r"\s+([イウエ])[ \u3000]", r"\n\1 ", choices_raw).strip()
         choices_fmt = re.sub(r"^([アイウエ])[ \u3000]", r"**\1** ", choices_fmt, flags=re.MULTILINE)
@@ -195,9 +195,12 @@ def pick_filtered(items: list[QuizItem], option: str) -> QuizItem | None:
         filtered = [it for it in items if it.category == "科目B"]
     else:
         filtered = [
-            it for it in items
-            if opt in it.field or opt_lower in it.field.lower()
-            or opt in it.qtype or opt_lower in it.qtype.lower()
+            it
+            for it in items
+            if opt in it.field
+            or opt_lower in it.field.lower()
+            or opt in it.qtype
+            or opt_lower in it.qtype.lower()
         ]
 
     return pick_random(filtered) if filtered else None
@@ -210,4 +213,10 @@ def normalize_answer(text: str) -> str | None:
         if t == mark or t.startswith(mark):
             return mark
     m = re.search(r"([アイウエ])", t)
+    return m.group(1) if m else None
+
+
+def normalize_quiz_reply(text: str) -> str | None:
+    """Strict extraction: accepts only a bare choice mark with optional trailing punctuation."""
+    m = re.fullmatch(r"([アイウエ])[、。．.,\s]*", text.strip())
     return m.group(1) if m else None
