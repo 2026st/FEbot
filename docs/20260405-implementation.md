@@ -18,7 +18,7 @@
 ## 運用上の注意
 
 - 初回・コーパス更新後は必ず `python scripts/ingest.py` を実行してから `python -m febot` を起動する。
-- 練習問題のスレッド解答は **インメモリ** の `pending_quiz` で保持する（プロセス再起動で失われる）。
+- スレッド単位の会話履歴・練習問題状態は **インメモリ** の `ThreadSessionStore`（`thread_session.py`）で保持する（プロセス再起動で失われる）。詳細は [20260519-thread-conversation-history.md](20260519-thread-conversation-history.md)。
 - 本番ではログ方針・コスト上限・Redis 等の状態保持を別途設計すること。
 
 ## 具体例

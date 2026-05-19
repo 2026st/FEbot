@@ -15,6 +15,7 @@ import chromadb
 from febot.config import Settings
 from febot.llm_backend import get_llm_backend
 from febot.supabase_storage import SupabaseStorage
+from febot.thread_session import ChatTurn, build_user_content_with_history, embed_query_text
 
 COLLECTION = "febot_corpus"
 GLOSSARY_FILE = "glossary.md"
@@ -33,6 +34,18 @@ SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支�
 class RagAnswer:
     text: str
     sources: list[str]
+
+
+def build_rag_user_content(
+    question: str,
+    context: str,
+    history: list[ChatTurn] | None = None,
+) -> str:
+    return build_user_content_with_history(
+        question=question,
+        context=context,
+        history=history,
+    )
 
 
 def _chunk_text(text: str, source: str) -> list[tuple[str, dict[str, str]]]:
@@ -171,7 +184,13 @@ class RagEngine:
         self.limiter = RateLimiter(settings.rate_limit_per_minute)
         self._glossary_sections = _load_glossary_sections(settings.corpus_dir)
 
-    def answer(self, user_id: str, question: str) -> RagAnswer | None:
+    def answer(
+        self,
+        user_id: str,
+        question: str,
+        *,
+        history: list[ChatTurn] | None = None,
+    ) -> RagAnswer | None:
         """Answer from corpus. Returns None if no relevant knowledge found (triggers web search fallback)."""
         if not self.limiter.allow(user_id):
             return RagAnswer(
@@ -179,7 +198,8 @@ class RagEngine:
                 sources=[],
             )
 
-        query_vector = self.llm.embed_texts([question])[0]
+        embed_text = embed_query_text(question, history)
+        query_vector = self.llm.embed_texts([embed_text])[0]
 
         # Use Supabase or Chroma based on configuration
         if self._storage:
@@ -267,7 +287,7 @@ class RagEngine:
 
         context = "\n\n".join(parts) if parts else "（参照なし）"
 
-        user_content = f"【ユーザーの質問】\n{question}\n\n【参照抜粋】\n{context}"
+        user_content = build_rag_user_content(question, context, history)
 
         text = self.llm.chat(
             SYSTEM_PROMPT,

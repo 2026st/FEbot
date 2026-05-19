@@ -68,7 +68,17 @@ def pick_random(items: list[QuizItem]) -> QuizItem | None:
     return random.choice(items)
 
 
+_QUIZ_REPLY_STRICT_RE = re.compile(r"^([アイウエ])(?:[．.、,])?$")
+
+
+def normalize_quiz_reply(text: str) -> str | None:
+    """Strict quiz answer: single choice mark only (avoids grading「なぜウが…」as ウ)."""
+    m = _QUIZ_REPLY_STRICT_RE.match(text.strip())
+    return m.group(1) if m else None
+
+
 def normalize_answer(text: str) -> str | None:
+    """Loose extraction of a choice mark (non-quiz use)."""
     t = text.strip()
     for mark in ("ア", "イ", "ウ", "エ"):
         if t == mark or t.startswith(mark):
