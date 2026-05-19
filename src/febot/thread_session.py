@@ -41,6 +41,28 @@ def format_history_for_prompt(turns: list[ChatTurn]) -> str:
     return "\n".join(lines)
 
 
+def embed_query_text(
+    question: str,
+    history: list[ChatTurn] | None = None,
+    *,
+    max_len: int = 500,
+) -> str:
+    """Build text for vector search; include last user turn when follow-up is short."""
+    if not history:
+        return question
+    last_user: str | None = None
+    for turn in reversed(history):
+        if turn.role == "user":
+            last_user = turn.text
+            break
+    if not last_user or last_user.strip() == question.strip():
+        return question
+    combined = f"{last_user}\n{question}"
+    if len(combined) > max_len:
+        return combined[-max_len:]
+    return combined
+
+
 def build_user_content_with_history(
     *,
     question: str,

@@ -10,8 +10,11 @@
 | 項目 | 内容 |
 |------|------|
 | `thread_session.py` | スレッドキー `channel:thread_root_ts` で履歴・出題中クイズを管理 |
-| `slack_app.py` | 採点キーをスレッド親に統一。`bot_active` スレッドの `message.channels` で追質問を RAG にルーティング |
-| `rag.py` / `web_search.py` | プロンプト先頭に `【これまでの会話】` を付与（埋め込み検索は直近発話のみ） |
+| `slack_app.py` / `slack_handlers.py` | 採点キーをスレッド親に統一。`bot_active` スレッドの `message.channels` で追質問を RAG にルーティング |
+| `rag.py` / `web_search.py` | プロンプト先頭に `【これまでの会話】` を付与。ベクトル検索は直近ユーザー発話＋今回質問を連結 |
+| クイズ出題 | `append_assistant` で問題文を履歴に保存（採点後の追質問で文脈を保持） |
+| クイズ採点 | `normalize_quiz_reply` で単独の「ア〜エ」のみ採点。それ以外は RAG に委譲 |
+| `app_mention` | スレッド内のメンション付き解答も採点。`message` 側は bot メンション・処理済み ts をスキップして二重応答を防止 |
 
 ## 制限
 

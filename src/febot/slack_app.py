@@ -16,13 +16,15 @@ from febot import web_search as ws
 from febot.bedrock_errors import slack_reply_for_bedrock_access_error
 from febot.config import Settings
 from febot.content_filter import ContentFilter
-from febot.quiz import QuizItem, load_quiz_items, normalize_answer, pick_random
+from febot.quiz import QuizItem, load_quiz_items, pick_random
 from febot.rag import RagEngine
-from febot.thread_session import (
-    ThreadSessionStore,
-    thread_key,
-    thread_root_ts_from_event,
+from febot.slack_handlers import (
+    ProcessedEvents,
+    session_key,
+    text_mentions_bot,
+    try_handle_quiz_reply,
 )
+from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_from_event
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +70,8 @@ class BotState:
 
     sessions: ThreadSessionStore = field(default_factory=ThreadSessionStore)
     quiz_items: list[QuizItem] = field(default_factory=list)
+    processed_events: ProcessedEvents = field(default_factory=ProcessedEvents)
+    bot_user_id: str | None = None
 
 
 def _strip_mentions(text: str) -> str:
@@ -98,49 +102,19 @@ def _reply_thread_ts(event: dict) -> str:
     return thread_root_ts_from_event(event)
 
 
-def _session_key(event: dict) -> str:
-    return thread_key(event["channel"], thread_root_ts_from_event(event))
+def _mark_event_processed(state: BotState, event: dict) -> None:
+    state.processed_events.mark(event["channel"], event["ts"])
 
 
-def _grade_quiz_answer(item: QuizItem, ans: str) -> str:
-    if ans == item.correct:
-        return f"正解です（{item.correct}）。\n*解説*: {item.explanation}"
-    return f"不正解です。あなたの解答: {ans} / 正解: {item.correct}\n*解説*: {item.explanation}"
-
-
-def _try_handle_quiz_reply(
-    state: BotState,
-    event: dict,
-    text: str,
-    say,
-) -> bool:
-    """Handle quiz answer in thread. Returns True if handled."""
-    thread_ts = event.get("thread_ts")
-    if not thread_ts:
-        return False
-    key = _session_key(event)
-    item = state.sessions.peek_quiz(key)
-    if item is None:
-        return False
-
-    ans = normalize_answer(text)
-    if not ans:
-        say("「ア」「イ」「ウ」「エ」で答えてください。", thread_ts=thread_ts)
-        return True
-
-    msg = _grade_quiz_answer(item, ans)
-    say(msg, thread_ts=thread_ts)
-    state.sessions.clear_quiz(key)
-    state.sessions.append_user(key, text)
-    state.sessions.append_assistant(key, msg)
-    return True
+def _event_already_processed(state: BotState, event: dict) -> bool:
+    return state.processed_events.was_processed(event["channel"], event["ts"])
 
 
 def _handle_rag_question(
     rag: RagEngine,
     settings: Settings,
     state: BotState,
-    session_key: str,
+    session_key_str: str,
     text: str,
     user_id: str,
     say,
@@ -148,9 +122,9 @@ def _handle_rag_question(
 ) -> None:
     """RAG → Web search fallback → corpus save → reply."""
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
-    history = state.sessions.history_for_prompt(session_key)
-    state.sessions.append_user(session_key, text)
-    state.sessions.mark_active(session_key)
+    history = state.sessions.history_for_prompt(session_key_str)
+    state.sessions.append_user(session_key_str, text)
+    state.sessions.mark_active(session_key_str)
 
     say(random.choice(_THINKING_MESSAGES), **kwargs)
 
@@ -161,7 +135,7 @@ def _handle_rag_question(
         msg = slack_reply_for_bedrock_access_error(e)
         err_text = msg or "処理中にエラーが発生しました。管理者に連絡してください。"
         say(err_text, **kwargs)
-        state.sessions.append_assistant(session_key, err_text)
+        state.sessions.append_assistant(session_key_str, err_text)
         return
 
     if out is not None:
@@ -188,7 +162,7 @@ def _handle_rag_question(
             reply_text += "\n\n【出典】\n" + "\n".join(f"- {c}" for c in citations)
 
         say(reply_text, **kwargs)
-        state.sessions.append_assistant(session_key, reply_text)
+        state.sessions.append_assistant(session_key_str, reply_text)
         return
 
     say("ナレッジベースに情報が見つかりませんでした。Webを検索中です...", **kwargs)
@@ -197,7 +171,7 @@ def _handle_rag_question(
     if not results:
         fallback = "Web検索でも情報が見つかりませんでした。別のキーワードでお試しください。"
         say(fallback, **kwargs)
-        state.sessions.append_assistant(session_key, fallback)
+        state.sessions.append_assistant(session_key_str, fallback)
         return
 
     try:
@@ -206,7 +180,7 @@ def _handle_rag_question(
         log.exception("web answer build failed: %s", e)
         err_text = "Web検索結果の要約中にエラーが発生しました。"
         say(err_text, **kwargs)
-        state.sessions.append_assistant(session_key, err_text)
+        state.sessions.append_assistant(session_key_str, err_text)
         return
 
     try:
@@ -216,7 +190,7 @@ def _handle_rag_question(
 
     full_reply = slack_text + "\n\n_（Web検索より取得。次回からはナレッジベースで回答します）_"
     say(full_reply, **kwargs)
-    state.sessions.append_assistant(session_key, full_reply)
+    state.sessions.append_assistant(session_key_str, full_reply)
 
 
 def _post_quiz(
@@ -231,9 +205,11 @@ def _post_quiz(
         say("練習問題データが見つかりません。", thread_ts=thread_ts)
         return
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
-    say(_format_quiz(item), **kwargs)
+    quiz_text = _format_quiz(item)
+    say(quiz_text, **kwargs)
     key = thread_key(event["channel"], thread_ts or event["ts"])
     state.sessions.set_quiz(key, item)
+    state.sessions.append_assistant(key, quiz_text)
 
 
 def _run_rag_if_allowed(
@@ -265,7 +241,7 @@ def _run_rag_if_allowed(
         rag,
         settings,
         state,
-        _session_key(event),
+        session_key(event),
         text,
         event.get("user", ""),
         say,
@@ -281,6 +257,12 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
     state = BotState(quiz_items=load_quiz_items(settings.corpus_dir))
 
     app = App(token=settings.slack_token)
+    try:
+        auth = app.client.auth_test()
+        state.bot_user_id = auth.get("user_id")
+        log.info("Slack bot user_id=%s", state.bot_user_id)
+    except Exception as e:
+        log.warning("auth.test failed (mention dedupe disabled): %s", e)
 
     @app.command("/fe-help")
     def fe_help(ack, respond):
@@ -289,10 +271,13 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
 
     @app.event("app_mention")
     def on_mention(event, say, logger):
+        _mark_event_processed(state, event)
         text = _strip_mentions(event.get("text", ""))
         reply_ts = _reply_thread_ts(event)
         if not text:
             say("メッセージを入力してください。", thread_ts=reply_ts)
+            return
+        if event.get("thread_ts") and try_handle_quiz_reply(state.sessions, event, text, say):
             return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
@@ -324,14 +309,21 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         ):
             return
 
+        if _event_already_processed(state, event):
+            return
+
         ch_type = event.get("channel_type")
         thread_ts = event.get("thread_ts")
         text = (event.get("text") or "").strip()
 
-        if thread_ts and _try_handle_quiz_reply(state, event, text, say):
+        if text_mentions_bot(text, state.bot_user_id):
             return
 
-        key = _session_key(event)
+        if thread_ts and try_handle_quiz_reply(state.sessions, event, text, say):
+            _mark_event_processed(state, event)
+            return
+
+        key = session_key(event)
         in_thread = bool(thread_ts)
         bot_active = state.sessions.is_bot_active(key)
 
@@ -364,9 +356,12 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             if not item:
                 say("練習問題データが見つかりません。")
                 return
-            resp = say(_format_quiz(item))
+            quiz_text = _format_quiz(item)
+            resp = say(quiz_text)
             quiz_root = resp.get("ts") or event["ts"]
-            state.sessions.set_quiz(thread_key(event["channel"], quiz_root), item)
+            dm_key = thread_key(event["channel"], quiz_root)
+            state.sessions.set_quiz(dm_key, item)
+            state.sessions.append_assistant(dm_key, quiz_text)
             return
         _run_rag_if_allowed(
             rag,

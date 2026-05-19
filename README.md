@@ -165,5 +165,12 @@ python3 -m pytest
 
 - **Socket Mode** をオンにする。
 - **Bot Token Scopes** の例: `app_mentions:read`, `chat:write`, `channels:history`, `im:history`（DM 利用時）
-- **Event Subscriptions**: `app_mention`, `message.channels`（チャンネルスレッドでの解答用）, `message.im`
+- **プライベートチャンネル**でもスレッド追質問・採点を使う場合: `groups:history` と Event `message.groups` を追加
+- **Event Subscriptions**（必須）: `app_mention`, `message.channels`（スレッド追質問・練習問題の解答）, `message.im`
 - **Slash Commands**: `/fe-help`
+
+### デプロイ後チェックリスト
+
+1. 上記 Event / Scope が Slack アプリに登録されていること（`message.channels` が無いと追質問・採点が届かない）
+2. ボットプロセスを再起動し、`feat/#31` 以降のビルドが動いていること
+3. チャンネルで `@FEbot 過去問` → スレッドに `イ` → 正誤。続けてメンションなしで追質問できること

@@ -15,7 +15,7 @@ import chromadb
 from febot.config import Settings
 from febot.llm_backend import get_llm_backend
 from febot.supabase_storage import SupabaseStorage
-from febot.thread_session import ChatTurn, build_user_content_with_history
+from febot.thread_session import ChatTurn, build_user_content_with_history, embed_query_text
 
 COLLECTION = "febot_corpus"
 GLOSSARY_FILE = "glossary.md"
@@ -199,7 +199,8 @@ class RagEngine:
                 sources=[],
             )
 
-        query_vector = self.llm.embed_texts([question])[0]
+        embed_text = embed_query_text(question, history)
+        query_vector = self.llm.embed_texts([embed_text])[0]
 
         # Use Supabase or Chroma based on configuration
         if self._storage:
