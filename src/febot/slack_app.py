@@ -22,6 +22,7 @@ from febot.slack_handlers import (
     ProcessedEvents,
     session_key,
     text_mentions_bot,
+    try_handle_percent_command,
     try_handle_quiz_reply,
 )
 from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_from_event
@@ -53,6 +54,7 @@ def _help_text(settings: Settings) -> str:
         "• DM でも同じように送れます\n"
         "• 「過去問」「出題」「練習問題」と書くと *オリジナル練習問題* を出します（スレッドに解答）\n"
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
+        "• ヘルプ: メッセージで `%help` または `%febot-help`（チャンネルでは @ボット と併用）。Slack では `/fe-help` も利用可\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
         "• コーパスには IPA 公表 PDF から抽出した `ipa-*.md` とオリジナル教材があります。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
     )
@@ -277,6 +279,13 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if not text:
             say("メッセージを入力してください。", thread_ts=reply_ts)
             return
+        if try_handle_percent_command(
+            text,
+            help_text=_help_text(settings),
+            say=say,
+            thread_ts=reply_ts,
+        ):
+            return
         if event.get("thread_ts") and try_handle_quiz_reply(state.sessions, event, text, say):
             return
         if _wants_quiz(text):
@@ -330,6 +339,14 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if in_thread and bot_active:
             if not text:
                 return
+            if try_handle_percent_command(
+                text,
+                help_text=_help_text(settings),
+                say=say,
+                thread_ts=thread_ts,
+            ):
+                _mark_event_processed(state, event)
+                return
             _run_rag_if_allowed(
                 rag,
                 content_filter,
@@ -350,6 +367,12 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
 
         if not text:
+            return
+        if try_handle_percent_command(
+            text,
+            help_text=_help_text(settings),
+            say=say,
+        ):
             return
         if _wants_quiz(text):
             item = pick_random(state.quiz_items)

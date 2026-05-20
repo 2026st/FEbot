@@ -159,6 +159,7 @@ python3 -m pytest
 - **チャンネル**: ボットに **メンション**して質問。キーワード「過去問」「出題」「練習問題」で `sample-questions.md` から問題を出題し、**スレッド**で「ア」「イ」「ウ」「エ」に返信すると正誤と解説。
 - **スレッド追質問**: ボットが一度応答したスレッドでは、メンションなしで追質問できる（会話履歴はプロセス稼働中のみ。再起動でリセット）。
 - **DM**: メンション不要。上記キーワードと RAG 質問が同様に使える。
+- **ヘルプ（`%` コマンド）**: メッセージ先頭が `%` のときコマンドとして扱う。`%help` / `%febot-help` で利用ガイドを表示（チャンネルでは @ボット と併用）。スラッシュ `/fe-help` も利用可。
 - **RAG**: Chroma で類似チャンクを取得（距離しきい値・`glossary.md` ブーストあり）。埋め込みモデルを変えた場合は `RAG_MAX_DISTANCE` の再調整が必要になることがある。LLM が「参照抜粋にない」と判断した場合や、検索ヒットが無い場合は **Web 検索フォールバック**に進み、取得内容をコーパスに追記してから回答する。
 
 ## Slack アプリ側（概要）
@@ -167,7 +168,7 @@ python3 -m pytest
 - **Bot Token Scopes** の例: `app_mentions:read`, `chat:write`, `channels:history`, `im:history`（DM 利用時）
 - **プライベートチャンネル**でもスレッド追質問・採点を使う場合: `groups:history` と Event `message.groups` を追加
 - **Event Subscriptions**（必須）: `app_mention`, `message.channels`（スレッド追質問・練習問題の解答）, `message.im`
-- **Slash Commands**: `/fe-help`
+- **Slash Commands**: `/fe-help`（メッセージの `%help` / `%febot-help` と同等）
 
 ### デプロイ後チェックリスト
 

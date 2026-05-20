@@ -11,6 +11,10 @@ from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_
 _PROCESSED_EVENT_TTL_SEC = 5.0
 _PROCESSED_EVENT_MAX = 100
 
+HELP_COMMANDS = frozenset({"help", "febot-help", "fe-help"})
+_PERCENT_USAGE = "コマンド形式: `%help` または `%febot-help`（Slack では `/fe-help` も利用可）"
+_UNKNOWN_COMMAND_TEMPLATE = "不明なコマンド: %{name}。利用可能: %help, %febot-help"
+
 
 class ProcessedEvents:
     """Dedupe app_mention + message.channels for the same Slack message ts."""
@@ -46,6 +50,41 @@ class ProcessedEvents:
             self._seen.pop(oldest_key, None)
         while len(self._seen) > self._max_size:
             self._seen.popitem(last=False)
+
+
+def parse_percent_command(text: str) -> str | None:
+    """Return command name (lowercase) if text is a % command, else None. '%' alone -> ''."""
+    stripped = text.strip()
+    if not stripped.startswith("%"):
+        return None
+    body = stripped[1:].strip()
+    if not body:
+        return ""
+    name, _, _ = body.partition(" ")
+    return name.lower()
+
+
+def try_handle_percent_command(
+    text: str,
+    *,
+    help_text: str,
+    say,
+    thread_ts: str | None = None,
+) -> bool:
+    """Handle %prefixed commands. Returns True if handled."""
+    name = parse_percent_command(text)
+    if name is None:
+        return False
+
+    kwargs = {"thread_ts": thread_ts} if thread_ts else {}
+    if name in HELP_COMMANDS:
+        say(help_text, **kwargs)
+        return True
+    if name == "":
+        say(_PERCENT_USAGE, **kwargs)
+        return True
+    say(_UNKNOWN_COMMAND_TEMPLATE.format(name=name), **kwargs)
+    return True
 
 
 def session_key(event: dict) -> str:
