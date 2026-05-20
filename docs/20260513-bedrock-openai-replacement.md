@@ -32,7 +32,7 @@
 1. AWS 側でチャットモデルの **オンデマンドアクセス**（または利用可能な購入済みスループット）を有効化する。
 2. 実行主体に `bedrock:InvokeModel` および `bedrock:Converse`（利用する場合）を付与する。`jp.anthropic.*` など **geo inference profile** を使う場合は、追加で [Marketplace 向け IAM](./20260514-bedrock-marketplace-access.md) が必要になることがある。
 3. `.env` に [`.env.example`](../.env.example) に沿って AWS と `BEDROCK_CHAT_MODEL_ID` を設定し、**埋め込み用に `AI_API_KEY`** を設定する。
-4. **Chroma の再生成**: 旧 Titan（1024 次元）などと `AI_EMBEDDING_MODEL` の次元が異なる場合は `python3 scripts/ingest.py` を再実行する。
+4. **ベクトル DB の再投入**: 旧 Titan（1024 次元）などと `AI_EMBEDDING_MODEL` の次元が異なる場合は、運用中の ingest 手段で Chroma / Supabase を再構築する（ローカル corpus 用 `ingest.py` は廃止。 [20260520-remove-local-corpus.md](20260520-remove-local-corpus.md) 参照）。
 5. **距離しきい値**: `RAG_MAX_DISTANCE` はベクトル空間に依存する。回答品質が変わったら調整する。
 6. **Supabase**: pgvector の列次元は `AI_EMBEDDING_MODEL` に合わせる。
 

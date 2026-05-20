@@ -33,12 +33,8 @@ def build_answer(
     results: list[dict],
     *,
     history: list[ChatTurn] | None = None,
-) -> tuple[str, str]:
-    """Generate answer from web results using the configured LLM backend.
-
-    Returns:
-        (slack_reply_text, corpus_markdown_to_save)
-    """
+) -> str:
+    """Generate answer from web results using the configured LLM backend."""
     context_parts = []
     for r in results:
         title = r.get("title", "")
@@ -54,14 +50,9 @@ def build_answer(
         question_heading="【質問】",
         context_heading="【Web検索結果】",
     )
-    answer_text = llm.chat(
+    return llm.chat(
         SEARCH_SYSTEM_PROMPT,
         user_content,
         temperature=0.3,
         max_tokens=None,
     )
-
-    urls = "\n".join(f"- {r.get('href', '')}" for r in results if r.get("href"))
-    corpus_md = f"# Q: {question}\n\n{answer_text}\n\n## 参照URL\n{urls}\n"
-
-    return answer_text, corpus_md
