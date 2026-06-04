@@ -68,7 +68,8 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
 
    - **バックエンドの優先**: `USE_BEDROCK=true`、または `BEDROCK_CHAT_MODEL_ID` を設定するとチャットは Bedrock。`USE_BEDROCK=false` で OpenAI 互換のみに固定。
    - **Bedrock（チャット）時**: AWS 認証、`AWS_REGION` または `AWS_DEFAULT_REGION`（既定 `ap-northeast-1`）、`BEDROCK_CHAT_MODEL_ID`（未設定時の既定は `anthropic.claude-3-5-haiku-20241022-v1:0`）。IAM の例: `bedrock:InvokeModel`、Converse 利用時は `bedrock:Converse`。**加えて埋め込み用に `AI_API_KEY`（および任意で `AI_BASE_URL`・`AI_EMBEDDING_MODEL`）が必須。** 東京リージョンで Claude Sonnet 4.6 など **geo 推論**のみの場合は、AWS のモデルカードに従い `BEDROCK_CHAT_MODEL_ID=jp.anthropic.claude-sonnet-4-6` のように **jp. 付き inference profile ID** を指定できるが、この場合は **AWS Marketplace 向け IAM**（`ViewSubscriptions` / `Subscribe`）が追加で必要になることがある（詳細は [docs/20260514-bedrock-chat-model-invalid.md](docs/20260514-bedrock-chat-model-invalid.md)、[docs/20260514-bedrock-marketplace-access.md](docs/20260514-bedrock-marketplace-access.md)）。
-   - **（参考・互換用）** `BEDROCK_EMBEDDING_MODEL_ID` / `BEDROCK_EMBEDDING_DIMENSIONS` … 旧 Titan 埋め込み用。現状の ingest・RAG クエリは OpenAI 互換 API のためランタイムでは使わない（詳細は [docs/20260513-bedrock-openai-replacement.md](docs/20260513-bedrock-openai-replacement.md)）
+   - `BEDROCK_EMBEDDING_MODEL_ID` … Bedrock 埋め込みモデルID（既定 `amazon.titan-embed-text-v2:0`。現状は主に互換・将来拡張向け）
+   - `BEDROCK_EMBEDDING_DIMENSIONS` … Bedrock 埋め込み次元（既定 `1024`）
    - **OpenAI 互換のみ（Bedrock 未使用）**: `AI_API_KEY`、任意で `AI_BASE_URL`、`AI_CHAT_MODEL`（既定 `gpt-4o-mini`）、`AI_EMBEDDING_MODEL`（既定 `text-embedding-3-small`）
    - **埋め込み次元**: `AI_EMBEDDING_MODEL` を変えたら Chroma / pgvector の次元と一致させる。**モデルを変えたら `ingest` を再実行**すること。
 
@@ -145,12 +146,14 @@ Pull Request を出す前に、メンバー各自が次まで行う。
 
 PR がマージ可能になるには、GitHub Actions（`.github/workflows/ci-cd.yml`）と同じ基準をローカルでも満たすことが前提となる。
 
+- `scripts/check_sync.py`（実装・`README.md`・`.env.example` の同期チェック）
 - `ruff check` / `ruff format --check` 対象: `src/`、`scripts/`、`tests/`
 - `pytest`（複数 Python バージョンはワークフロー参照）
 
 ```bash
 python3 -m pip install -e ".[dev]"
-python3 -m ruff format src/ scripts/ tests/
+python3 scripts/check_sync.py
+python3 -m ruff format --check src/ scripts/ tests/
 python3 -m ruff check src/ scripts/ tests/
 python3 -m pytest
 ```
