@@ -1,4 +1,4 @@
-"""Slack Bolt app: Socket Mode, mentions, DM, quiz threads, /fe-help."""
+"""Slack Bolt app: Socket Mode, mentions, DM, quiz threads, /fe-help, /fe-format-test."""
 
 from __future__ import annotations
 
@@ -18,6 +18,13 @@ from febot.config import Settings
 from febot.content_filter import ContentFilter
 from febot.quiz import QuizItem, load_quiz_items, pick_random
 from febot.rag import RagEngine
+from febot.slack_format import (
+    FORMAT_TEST_FOOTER,
+    build_slack_blocks,
+    format_reply_for_history,
+    format_test_sample_body,
+    wants_format_test,
+)
 from febot.slack_handlers import (
     ProcessedEvents,
     session_key,
@@ -55,6 +62,7 @@ def _help_text(settings: Settings) -> str:
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
         "• コーパスには IPA 公表 PDF から抽出した `ipa-*.md` とオリジナル教材があります。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
+        "• *表示確認*: `/fe-format-test` またはメンション/DM で `フォーマットテスト` / `表示テスト`（AI 不要）\n"
     )
     if not settings.rag_enabled():
         return base + (
@@ -110,6 +118,38 @@ def _event_already_processed(state: BotState, event: dict) -> bool:
     return state.processed_events.was_processed(event["channel"], event["ts"])
 
 
+def _post_format_test(say, **kwargs) -> None:
+    """Post fixed sample via Block Kit (same path as RAG answers)."""
+    _say_formatted(say, format_test_sample_body(), footer=FORMAT_TEST_FOOTER, **kwargs)
+
+
+def _respond_format_test(respond) -> None:
+    body = format_test_sample_body()
+    fallback, blocks = build_slack_blocks(body, footer=FORMAT_TEST_FOOTER)
+    if blocks:
+        respond(text=fallback, blocks=blocks)
+    else:
+        respond(fallback)
+
+
+def _say_formatted(
+    say,
+    body: str,
+    *,
+    sources: list[str] | None = None,
+    footer: str | None = None,
+    **kwargs,
+) -> str:
+    """Post RAG answer with Slack Block Kit + mrkdwn; returns text stored in session."""
+    fallback, blocks = build_slack_blocks(body, footer=footer, sources=sources)
+    history_text = format_reply_for_history(body, sources=sources, footer=footer)
+    if blocks:
+        say(fallback, blocks=blocks, **kwargs)
+    else:
+        say(fallback, **kwargs)
+    return history_text
+
+
 def _handle_rag_question(
     rag: RagEngine,
     settings: Settings,
@@ -158,11 +198,13 @@ def _handle_rag_question(
                 if link not in citations:
                     citations.append(link)
 
-        if citations:
-            reply_text += "\n\n【出典】\n" + "\n".join(f"- {c}" for c in citations)
-
-        say(reply_text, **kwargs)
-        state.sessions.append_assistant(session_key_str, reply_text)
+        history_text = _say_formatted(
+            say,
+            reply_text,
+            sources=citations or None,
+            **kwargs,
+        )
+        state.sessions.append_assistant(session_key_str, history_text)
         return
 
     say("ナレッジベースに情報が見つかりませんでした。Webを検索中です...", **kwargs)
@@ -188,9 +230,14 @@ def _handle_rag_question(
     except Exception as e:
         log.warning("corpus save failed (non-fatal): %s", e)
 
-    full_reply = slack_text + "\n\n_（Web検索より取得。次回からはナレッジベースで回答します）_"
-    say(full_reply, **kwargs)
-    state.sessions.append_assistant(session_key_str, full_reply)
+    web_footer = "_（Web検索より取得。次回からはナレッジベースで回答します）_"
+    history_text = _say_formatted(
+        say,
+        slack_text,
+        footer=web_footer,
+        **kwargs,
+    )
+    state.sessions.append_assistant(session_key_str, history_text)
 
 
 def _post_quiz(
@@ -269,6 +316,11 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         ack()
         respond(_help_text(settings))
 
+    @app.command("/fe-format-test")
+    def fe_format_test(ack, respond):
+        ack()
+        _respond_format_test(respond)
+
     @app.event("app_mention")
     def on_mention(event, say, logger):
         _mark_event_processed(state, event)
@@ -278,6 +330,9 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             say("メッセージを入力してください。", thread_ts=reply_ts)
             return
         if event.get("thread_ts") and try_handle_quiz_reply(state.sessions, event, text, say):
+            return
+        if wants_format_test(text):
+            _post_format_test(say, thread_ts=reply_ts)
             return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
@@ -350,6 +405,9 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
 
         if not text:
+            return
+        if wants_format_test(text):
+            _post_format_test(say)
             return
         if _wants_quiz(text):
             item = pick_random(state.quiz_items)

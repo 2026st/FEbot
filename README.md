@@ -15,6 +15,7 @@
 - 問題解説機能（スレッドで正誤と解説を返す。同一スレッド内の会話履歴をプロセス稼働中に保持）
 - コーパスに該当がない質問は **DuckDuckGo 検索 → LLM で要約 → コーパスへ保存** し、次回以降はナレッジとして検索可能
 - **コンテンツフィルター機能**（LLM を使って質問が IT・プログラミング関連かを判定し、無関係な質問をフィルタリング）
+- **Slack 表示整形**（RAG / Web 回答を mrkdwn と Block Kit で投稿。見出し・表・出典を読みやすく表示。詳細は [docs/20260604-slack-mrkdwn-block-kit.md](docs/20260604-slack-mrkdwn-block-kit.md)）
 
 ## 非機能要件
 
@@ -171,10 +172,11 @@ python3 -m pytest
 - **Bot Token Scopes** の例: `app_mentions:read`, `chat:write`, `channels:history`, `im:history`（DM 利用時）
 - **プライベートチャンネル**でもスレッド追質問・採点を使う場合: `groups:history` と Event `message.groups` を追加
 - **Event Subscriptions**（必須）: `app_mention`, `message.channels`（スレッド追質問・練習問題の解答）, `message.im`
-- **Slash Commands**: `/fe-help`
+- **Slash Commands**: `/fe-help`, `/fe-format-test`（Block Kit 表示の目視テスト用。AI・RAG 不要）
 
 ### デプロイ後チェックリスト
 
 1. 上記 Event / Scope が Slack アプリに登録されていること（`message.channels` が無いと追質問・採点が届かない）
 2. ボットプロセスを再起動し、`feat/#31` 以降のビルドが動いていること
 3. チャンネルで `@FEbot 過去問` → スレッドに `イ` → 正誤。続けてメンションなしで追質問できること
+4. 表示確認: `/fe-format-test` または `@FEbot フォーマットテスト`（太字・箇条書き・見出し・表・出典が意図どおりか）
