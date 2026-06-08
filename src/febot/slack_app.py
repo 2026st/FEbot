@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 import random
 import re
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -27,6 +30,9 @@ from febot.slack_format import (
 )
 from febot.slack_handlers import (
     ProcessedEvents,
+    build_quiz_message,
+    format_quiz_history,
+    handle_quiz_button,
     session_key,
     text_mentions_bot,
     try_handle_quiz_reply,
@@ -34,6 +40,28 @@ from febot.slack_handlers import (
 from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_from_event
 
 log = logging.getLogger(__name__)
+
+# #region agent log
+_DEBUG_LOG = Path(__file__).resolve().parents[2] / "debug-1c457e.log"
+
+
+def _agent_debug(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    try:
+        payload = {
+            "sessionId": "1c457e",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with _DEBUG_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# #endregion
 
 QUIZ_KEYWORDS = ("過去問", "出題", "練習問題")
 
@@ -58,7 +86,7 @@ def _help_text(settings: Settings) -> str:
         "*FE 学習ボット（RAG / PoC）*\n\n"
         "• チャンネルでは *@ボット* にメンションして質問（用語・学習の相談など）\n"
         "• DM でも同じように送れます\n"
-        "• 「過去問」「出題」「練習問題」と書くと *オリジナル練習問題* を出します（スレッドに解答）\n"
+        "• 「過去問」「出題」「練習問題」と書くと *オリジナル練習問題* を出します（選択肢ボタンまたはスレッドで解答）\n"
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
         "• コーパスには IPA 公表 PDF から抽出した `ipa-*.md` とオリジナル教材があります。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
@@ -88,15 +116,6 @@ def _strip_mentions(text: str) -> str:
 
 def _wants_quiz(text: str) -> bool:
     return any(k in text for k in QUIZ_KEYWORDS)
-
-
-def _format_quiz(q: QuizItem) -> str:
-    return (
-        f"【練習問題】`{q.qid}` ({q.qtype})\n"
-        f"{q.body}\n\n"
-        f"{q.choices}\n\n"
-        "答えはこのスレッドに「ア」「イ」「ウ」「エ」で返信してください。"
-    )
 
 
 def _make_cache_filename(question: str) -> str:
@@ -252,11 +271,12 @@ def _post_quiz(
         say("練習問題データが見つかりません。", thread_ts=thread_ts)
         return
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
-    quiz_text = _format_quiz(item)
-    say(quiz_text, **kwargs)
-    key = thread_key(event["channel"], thread_ts or event["ts"])
+    fallback, blocks = build_quiz_message(item)
+    resp = say(fallback, blocks=blocks, **kwargs)
+    root = thread_ts or resp.get("ts") or event["ts"]
+    key = thread_key(event["channel"], root)
     state.sessions.set_quiz(key, item)
-    state.sessions.append_assistant(key, quiz_text)
+    state.sessions.append_assistant(key, format_quiz_history(item))
 
 
 def _run_rag_if_allowed(
@@ -272,6 +292,14 @@ def _run_rag_if_allowed(
     filtered_msg: str,
 ) -> None:
     if rag is None:
+        # #region agent log
+        _agent_debug(
+            "A",
+            "slack_app.py:_run_rag_if_allowed",
+            "rag is None, posting NO_AI_REPLY",
+            {"text_len": len(text), "thread_ts": thread_ts},
+        )
+        # #endregion
         say(NO_AI_REPLY, thread_ts=thread_ts)
         return
     if content_filter is not None:
@@ -321,8 +349,26 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         ack()
         _respond_format_test(respond)
 
+    @app.action("quiz_answer")
+    def on_quiz_answer(ack, body, say):
+        ack()
+        handle_quiz_button(state.sessions, body, say)
+
     @app.event("app_mention")
     def on_mention(event, say, logger):
+        # #region agent log
+        _agent_debug(
+            "B",
+            "slack_app.py:on_mention",
+            "app_mention received",
+            {
+                "channel": event.get("channel"),
+                "channel_type": event.get("channel_type"),
+                "has_thread_ts": bool(event.get("thread_ts")),
+                "text_preview": (event.get("text") or "")[:80],
+            },
+        )
+        # #endregion
         _mark_event_processed(state, event)
         text = _strip_mentions(event.get("text", ""))
         reply_ts = _reply_thread_ts(event)
@@ -337,6 +383,14 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
             return
+        # #region agent log
+        _agent_debug(
+            "B",
+            "slack_app.py:on_mention",
+            "mention RAG path",
+            {"text_preview": text[:80], "reply_ts": reply_ts},
+        )
+        # #endregion
         _run_rag_if_allowed(
             rag,
             content_filter,
@@ -365,6 +419,14 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
 
         if _event_already_processed(state, event):
+            # #region agent log
+            _agent_debug(
+                "C",
+                "slack_app.py:on_message",
+                "skipped: already processed by app_mention",
+                {"channel": event.get("channel"), "ts": event.get("ts")},
+            )
+            # #endregion
             return
 
         ch_type = event.get("channel_type")
@@ -385,6 +447,14 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if in_thread and bot_active:
             if not text:
                 return
+            # #region agent log
+            _agent_debug(
+                "B",
+                "slack_app.py:on_message",
+                "thread follow-up RAG path",
+                {"key": key, "text_preview": text[:80]},
+            )
+            # #endregion
             _run_rag_if_allowed(
                 rag,
                 content_filter,
@@ -402,6 +472,19 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
 
         if ch_type != "im":
+            # #region agent log
+            _agent_debug(
+                "C",
+                "slack_app.py:on_message",
+                "ignored: channel message without mention",
+                {
+                    "channel_type": ch_type,
+                    "in_thread": in_thread,
+                    "bot_active": bot_active,
+                    "text_preview": text[:80],
+                },
+            )
+            # #endregion
             return
 
         if not text:
@@ -410,17 +493,16 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             _post_format_test(say)
             return
         if _wants_quiz(text):
-            item = pick_random(state.quiz_items)
-            if not item:
-                say("練習問題データが見つかりません。")
-                return
-            quiz_text = _format_quiz(item)
-            resp = say(quiz_text)
-            quiz_root = resp.get("ts") or event["ts"]
-            dm_key = thread_key(event["channel"], quiz_root)
-            state.sessions.set_quiz(dm_key, item)
-            state.sessions.append_assistant(dm_key, quiz_text)
+            _post_quiz(state, event, say, thread_ts=None)
             return
+        # #region agent log
+        _agent_debug(
+            "B",
+            "slack_app.py:on_message",
+            "DM RAG path",
+            {"text_preview": text[:80]},
+        )
+        # #endregion
         _run_rag_if_allowed(
             rag,
             content_filter,
@@ -446,6 +528,22 @@ def run() -> None:
 
     logging.basicConfig(level=logging.INFO)
     settings = Settings.load()
+    # #region agent log
+    from febot.config import _aws_credentials_available
+
+    _agent_debug(
+        "A",
+        "slack_app.py:run",
+        "startup rag config",
+        {
+            "use_bedrock": settings.use_bedrock,
+            "ai_api_key_set": bool(settings.ai_api_key),
+            "aws_creds": _aws_credentials_available(),
+            "rag_enabled": settings.rag_enabled(),
+            "rag_engine_will_init": settings.rag_enabled(),
+        },
+    )
+    # #endregion
     if settings.rag_enabled():
         try:
             chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(COLLECTION)

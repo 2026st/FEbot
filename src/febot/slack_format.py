@@ -10,6 +10,8 @@ from html import escape
 
 log = logging.getLogger(__name__)
 
+MAX_CONTEXT_ELEMENTS = 10
+
 SLACK_OUTPUT_RULES = """
 【Slack向け出力形式】
 - 見出しは # または【見出し】（どちらも Block Kit の header に変換）
@@ -458,12 +460,22 @@ def _section_block(mrkdwn: str) -> dict:
     }
 
 
-def _context_block(sources: list[str]) -> dict:
-    elements = []
-    for url in sources[:10]:
-        elements.append({"type": "mrkdwn", "text": f"<{url}>"})
-    label = {"type": "mrkdwn", "text": "*出典*"}
-    return {"type": "context", "elements": [label, *elements]}
+def _context_blocks(sources: list[str]) -> list[dict]:
+    """Build context block(s) for sources. Slack allows max 10 elements per context block."""
+    blocks: list[dict] = []
+    remaining = list(sources)
+    first = True
+    while remaining:
+        elements: list[dict] = []
+        budget = MAX_CONTEXT_ELEMENTS - (1 if first else 0)
+        if first:
+            elements.append({"type": "mrkdwn", "text": "*出典*"})
+            first = False
+        for url in remaining[:budget]:
+            elements.append({"type": "mrkdwn", "text": f"<{url}>"})
+        remaining = remaining[budget:]
+        blocks.append({"type": "context", "elements": elements})
+    return blocks
 
 
 def build_slack_blocks(
@@ -491,7 +503,7 @@ def build_slack_blocks(
             blocks.extend(_segment_to_blocks(seg))
 
     if all_sources:
-        blocks.append(_context_block(all_sources))
+        blocks.extend(_context_blocks(all_sources))
 
     if footer:
         blocks.append(_section_block(footer))

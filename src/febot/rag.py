@@ -14,8 +14,8 @@ import chromadb
 
 from febot.config import Settings
 from febot.llm_backend import get_llm_backend
-from febot.supabase_storage import SupabaseStorage
 from febot.slack_format import SLACK_OUTPUT_RULES
+from febot.supabase_storage import SupabaseStorage
 from febot.thread_session import ChatTurn, build_user_content_with_history, embed_query_text
 
 COLLECTION = "febot_corpus"

@@ -51,6 +51,16 @@ def test_sources_passed_explicitly() -> None:
     assert "https://example.com" in contexts[0]["elements"][1]["text"]
 
 
+def test_many_sources_respect_context_element_limit() -> None:
+    urls = [f"https://example.com/{i}" for i in range(10)]
+    _fallback, blocks = build_slack_blocks("本文", sources=urls)
+    contexts = [b for b in blocks if b.get("type") == "context"]
+    assert len(contexts) == 2
+    assert len(contexts[0]["elements"]) == 10
+    assert contexts[0]["elements"][0]["text"] == "*出典*"
+    assert len(contexts[1]["elements"]) == 1
+
+
 def test_long_section_split() -> None:
     body = "x" * 3500
     _fallback, blocks = build_slack_blocks(body)
