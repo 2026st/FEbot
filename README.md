@@ -147,17 +147,27 @@ Pull Request を出す前に、メンバー各自が次まで行う。
 
 PR がマージ可能になるには、GitHub Actions（`.github/workflows/ci-cd.yml`）と同じ基準をローカルでも満たすことが前提となる。
 
-- `scripts/check_sync.py`（実装・`README.md`・`.env.example` の同期チェック）
-- `ruff check` / `ruff format --check` 対象: `src/`、`scripts/`、`tests/`
-- `pytest`（複数 Python バージョンはワークフロー参照）
+**推奨（コミット・PR 前）:** `scripts/ci_local.py --fix` で Ruff の自動整形・安全な Lint 修正を行ったうえで、CI と同じ検証を一括実行する。`ruff format --check` だけを手動で回すと未整形のまま失敗しやすいため、先に `ruff format`（`--check` なし）を通すか、このスクリプトを使う。
 
 ```bash
 python3 -m pip install -e ".[dev]"
-python3 scripts/check_sync.py
-python3 -m ruff format --check src/ scripts/ tests/
-python3 -m ruff check src/ scripts/ tests/
-python3 -m pytest
+python3 scripts/ci_local.py --fix
 ```
+
+`--fix` で直せない差分が残った場合は、表示されたファイルを手直ししてから `python3 scripts/ci_local.py`（検証のみ）を再実行する。
+
+### CI と同じ個別コマンド（参考）
+
+| 順 | 内容 | コマンド |
+|----|------|----------|
+| 0（任意） | 自動整形 | `python3 -m ruff format src scripts tests` |
+| 0（任意） | 安全な Lint 自動修正 | `python3 -m ruff check --fix src scripts tests` |
+| 1 | 同期チェック | `python3 scripts/check_sync.py` |
+| 2 | 整形確認（CI の Lint & format） | `python3 -m ruff format --check src scripts tests` |
+| 3 | Lint | `python3 -m ruff check src scripts tests` |
+| 4 | テスト | `python3 -m pytest` |
+
+`test` ジョブは Python 3.10 / 3.12 のマトリクス（ワークフロー参照）。ローカルは代表で 1 バージョン通ればよいが、互換性が気になる変更では両方試す。
 
 ## 実行時の挙動（要約）
 

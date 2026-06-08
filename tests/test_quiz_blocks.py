@@ -6,12 +6,7 @@ from febot.thread_session import ThreadSessionStore, thread_key
 
 
 def test_parse_choice_lines() -> None:
-    choices = (
-        "**ア** 選択肢A\n"
-        "**イ** 選択肢B\n"
-        "**ウ** 選択肢C\n"
-        "**エ** 選択肢D"
-    )
+    choices = "**ア** 選択肢A\n**イ** 選択肢B\n**ウ** 選択肢C\n**エ** 選択肢D"
     assert parse_choice_lines(choices) == [
         ("ア", "選択肢A"),
         ("イ", "選択肢B"),
@@ -31,9 +26,7 @@ def test_build_quiz_message_has_choice_buttons() -> None:
     )
     fallback, blocks = build_quiz_message(item)
     assert "問題文" in fallback
-    sections_with_buttons = [
-        b for b in blocks if b.get("type") == "section" and "accessory" in b
-    ]
+    sections_with_buttons = [b for b in blocks if b.get("type") == "section" and "accessory" in b]
     assert len(sections_with_buttons) == 4
     assert sections_with_buttons[0]["accessory"]["action_id"] == "quiz_answer"
     assert sections_with_buttons[0]["accessory"]["value"] == "ア"

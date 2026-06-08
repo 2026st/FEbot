@@ -24,13 +24,16 @@ GLOSSARY_FILE = "glossary.md"
 CHUNK_SIZE = 900
 CHUNK_OVERLAP = 120
 
-SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
+SYSTEM_PROMPT = (
+    """あなたは基本情報技術者試験（FE）の学習支援ボットです。
 与えられた【参照抜粋】のみを根拠に、初学者でも分かるように丁寧に日本語で答えてください。
 参照抜粋に質問への答えが含まれない場合は推測せず、「この質問に答える記述は参照抜粋にありません」と述べてください。
 「glossary.md（用語マッチ）」の節があるときは、用語説明の質問ではそれを最優先の根拠にしてください。
 試験の正式な出題やIPA公式の解釈を断定しないでください。
 
-""" + SLACK_OUTPUT_RULES
+"""
+    + SLACK_OUTPUT_RULES
+)
 
 
 @dataclass

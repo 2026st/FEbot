@@ -18,6 +18,7 @@
 
 ## コミット前チェック
 
+- `python3 scripts/ci_local.py --fix` が成功している（CI の Lint & format / 同期 / pytest と同等）
 - `README.md` / `.env.example` / 実装に矛盾がない
 - 不要なデバッグコードがない
 - 変更理由と影響が必要なら `docs/` に記録済み
