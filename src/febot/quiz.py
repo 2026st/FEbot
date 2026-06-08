@@ -68,6 +68,19 @@ def pick_random(items: list[QuizItem]) -> QuizItem | None:
     return random.choice(items)
 
 
+_CHOICE_LINE_RE = re.compile(r"^\*\*([アイウエ])\*\*\s*(.+)$")
+
+
+def parse_choice_lines(choices: str) -> list[tuple[str, str]]:
+    """Parse ``**ア** 本文`` lines into (mark, text) pairs."""
+    result: list[tuple[str, str]] = []
+    for line in choices.strip().splitlines():
+        m = _CHOICE_LINE_RE.match(line.strip())
+        if m:
+            result.append((m.group(1), m.group(2).strip()))
+    return result
+
+
 _QUIZ_REPLY_STRICT_RE = re.compile(r"^([アイウエ])(?:[．.、,])?$")
 
 
