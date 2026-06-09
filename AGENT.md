@@ -18,6 +18,8 @@
 
 ## 実行コマンド（基本）
 - 依存導入: `python3 -m pip install -e .`
+- 開発依存（CI 同等チェック用）: `python3 -m pip install -e ".[dev]"`
+- PR 前品質ゲート: `python3 scripts/ci_local.py --fix`
 - 追加依存を含める場合: `python3 -m pip install -r requirements.txt`
 - Bot 起動: `python3 -m febot`
 

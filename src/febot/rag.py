@@ -11,15 +11,22 @@ import chromadb
 
 from febot.config import Settings
 from febot.llm_backend import get_llm_backend
+from febot.slack_format import SLACK_OUTPUT_RULES
 from febot.supabase_storage import SupabaseStorage
 from febot.thread_session import ChatTurn, build_user_content_with_history, embed_query_text
 
 COLLECTION = "febot_corpus"
 
-SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
+SYSTEM_PROMPT = (
+    """あなたは基本情報技術者試験（FE）の学習支援ボットです。
 与えられた【参照抜粋】のみを根拠に、初学者でも分かるように丁寧に日本語で答えてください。
 参照抜粋に質問への答えが含まれない場合は推測せず、「この質問に答える記述は参照抜粋にありません」と述べてください。
-試験の正式な出題やIPA公式の解釈を断定しないでください。"""
+「glossary.md（用語マッチ）」の節があるときは、用語説明の質問ではそれを最優先の根拠にしてください。
+試験の正式な出題やIPA公式の解釈を断定しないでください。
+
+"""
+    + SLACK_OUTPUT_RULES
+)
 
 _EMPTY_VECTOR_MSG = (
     "ベクトルストアにデータがありません。管理者にベクトル DB の投入を依頼してください。"
