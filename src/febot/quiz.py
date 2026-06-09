@@ -55,11 +55,9 @@ def parse_quiz_file(path: Path) -> list[QuizItem]:
     return items
 
 
-def load_quiz_items(corpus_dir: Path) -> list[QuizItem]:
-    path = corpus_dir / "sample-questions.md"
-    if not path.is_file():
-        return []
-    return parse_quiz_file(path)
+def load_quiz_items() -> list[QuizItem]:
+    """Practice questions are not loaded (local quiz data removed)."""
+    return []
 
 
 def pick_random(items: list[QuizItem]) -> QuizItem | None:

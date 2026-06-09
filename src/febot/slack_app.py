@@ -67,17 +67,16 @@ QUIZ_KEYWORDS = ("過去問", "出題", "練習問題")
 
 _THINKING_MESSAGES = [
     "🤔 thinking...",
-    "📚 コーパスをあさり中...",
-    "🔍 知識の海を泳いでいます...",
+    "🔍 ナレッジベースを検索中...",
     "⚙️ RAGエンジン起動中...",
     "🧠 基本情報技術者試験ボット、全力稼働中...",
 ]
 
 NO_AI_REPLY = (
     "RAG（用語解説・生成回答）を使う設定がありません。\n"
-    "• Bedrock（チャット）: `BEDROCK_CHAT_MODEL_ID` と AWS 認証に加え、埋め込み用に `AI_API_KEY` を設定し "
-    "`python3 scripts/ingest.py` を実行してください。\n"
-    "• OpenAI 互換のみ: `USE_BEDROCK=false` にするか Bedrock 用チャット ID を空にし、`AI_API_KEY` を設定して ingest してください。"
+    "• Bedrock（チャット）: `BEDROCK_CHAT_MODEL_ID` と AWS 認証に加え、埋め込み用に `AI_API_KEY` を設定してください。\n"
+    "• OpenAI 互換のみ: `USE_BEDROCK=false` にするか Bedrock 用チャット ID を空にし、`AI_API_KEY` を設定してください。\n"
+    "• ベクトル DB（Chroma または Supabase）が投入済みである必要があります。"
 )
 
 
@@ -171,7 +170,6 @@ def _say_formatted(
 
 def _handle_rag_question(
     rag: RagEngine,
-    settings: Settings,
     state: BotState,
     session_key_str: str,
     text: str,
@@ -179,7 +177,7 @@ def _handle_rag_question(
     say,
     thread_ts: str | None = None,
 ) -> None:
-    """RAG → Web search fallback → corpus save → reply."""
+    """RAG → Web search fallback → reply."""
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
     history = state.sessions.history_for_prompt(session_key_str)
     state.sessions.append_user(session_key_str, text)
@@ -202,15 +200,9 @@ def _handle_rag_question(
         citations = []
         for src in out.sources:
             if src.startswith("web_cache_"):
-                try:
-                    content = (settings.corpus_dir / src).read_text(encoding="utf-8")
-                    for line in content.splitlines():
-                        if line.startswith("- http"):
-                            url = line.lstrip("- ").strip()
-                            if url not in citations:
-                                citations.append(url)
-                except Exception:
-                    pass
+                for url in rag.citation_urls_for_source(src):
+                    if url not in citations:
+                        citations.append(url)
             else:
                 clean_src = src.split("（")[0] if "（" in src else src
                 link = f"https://github.com/2026st/FEbot/blob/main/data/corpus/{clean_src}"
@@ -282,7 +274,6 @@ def _post_quiz(
 def _run_rag_if_allowed(
     rag: RagEngine | None,
     content_filter: ContentFilter | None,
-    settings: Settings,
     state: BotState,
     event: dict,
     text: str,
@@ -314,7 +305,6 @@ def _run_rag_if_allowed(
             return
     _handle_rag_question(
         rag,
-        settings,
         state,
         session_key(event),
         text,
@@ -329,7 +319,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
     content_filter: ContentFilter | None = (
         ContentFilter(settings) if settings.rag_enabled() else None
     )
-    state = BotState(quiz_items=load_quiz_items(settings.corpus_dir))
+    state = BotState(quiz_items=load_quiz_items())
 
     app = App(token=settings.slack_token)
     try:
@@ -394,7 +384,6 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         _run_rag_if_allowed(
             rag,
             content_filter,
-            settings,
             state,
             event,
             text,
@@ -458,7 +447,6 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             _run_rag_if_allowed(
                 rag,
                 content_filter,
-                settings,
                 state,
                 event,
                 text,
@@ -506,7 +494,6 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         _run_rag_if_allowed(
             rag,
             content_filter,
-            settings,
             state,
             event,
             text,
@@ -545,20 +532,25 @@ def run() -> None:
     )
     # #endregion
     if settings.rag_enabled():
-        try:
-            chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(COLLECTION)
-        except Exception as e:
-            log.error(
-                "Chroma collection %r not found under %s. Run: python scripts/ingest.py (%s)",
-                COLLECTION,
-                settings.chroma_path,
-                e,
-            )
-            raise SystemExit(1) from e
+        if settings.use_supabase:
+            log.info("Using Supabase for vector search (Chroma startup check skipped)")
+        else:
+            try:
+                chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(COLLECTION)
+            except Exception as e:
+                log.error(
+                    "Chroma collection %r not found under %s. "
+                    "Ensure vector data exists at CHROMA_PATH (%s)",
+                    COLLECTION,
+                    settings.chroma_path,
+                    e,
+                )
+                raise SystemExit(1) from e
     else:
         log.warning(
-            "RAG 用の認証が無いため Chroma をスキップします（Slack のみ接続確認モード）。"
-            "Bedrock 利用時は AWS 認証に加え埋め込み用の AI_API_KEY が必要。OpenAI 互換のみなら AI_API_KEY を設定し ingest を実行してください。"
+            "RAG 用の認証が無いためベクトル DB チェックをスキップします（Slack のみ接続確認モード）。"
+            "Bedrock 利用時は AWS 認証に加え埋め込み用の AI_API_KEY が必要。"
+            "OpenAI 互換のみなら AI_API_KEY を設定し、ベクトル DB を用意してください。"
         )
     app, _state = create_app(settings)
     handler = SocketModeHandler(app, settings.slack_app_token)

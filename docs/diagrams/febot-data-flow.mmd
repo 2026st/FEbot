@@ -8,7 +8,7 @@ flowchart LR
   end
   subgraph sg_data["Data plane"]
     Vec["Vector store"]
-    Src["IPA and syllabus corpus"]
+    Src["Vector DB (Chroma or Supabase)"]
   end
   subgraph sg_model["Model options"]
     OptA["Vendor API"]
