@@ -58,7 +58,6 @@ class Settings:
     ai_chat_model: str
     ai_embedding_model: str
     chroma_path: Path
-    corpus_dir: Path
     rag_top_k: int
     rate_limit_per_minute: int
     supabase_url: str
@@ -102,7 +101,6 @@ class Settings:
         ai_embed = os.environ.get("AI_EMBEDDING_MODEL", "text-embedding-3-small").strip()
 
         chroma = Path(os.environ.get("CHROMA_PATH", str(root / "data" / "chroma"))).resolve()
-        corpus = Path(os.environ.get("CORPUS_DIR", str(root / "data" / "corpus"))).resolve()
 
         supabase_url = os.environ.get("SUPABASE_URL", "").strip()
         supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
@@ -130,7 +128,6 @@ class Settings:
             ai_chat_model=ai_chat,
             ai_embedding_model=ai_embed,
             chroma_path=chroma,
-            corpus_dir=corpus,
             rag_top_k=int(os.environ.get("RAG_TOP_K", "5")),
             rate_limit_per_minute=int(os.environ.get("RATE_LIMIT_PER_MINUTE", "20")),
             supabase_url=supabase_url,

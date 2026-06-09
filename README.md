@@ -10,11 +10,12 @@
 
 ## 機能要件
 
-- 用語解説機能（コーパス RAG＋`glossary.md` の用語マッチブースト）
-- 過去問・練習問題の出題（`data/corpus/sample-questions.md` をパース）
+- 用語解説機能（ベクトル DB RAG。未ヒット時は Web 検索フォールバック）
+- 練習問題の出題（データ未設定時は「練習問題データが見つかりません」）
 - 問題解説機能（スレッドで正誤と解説を返す。同一スレッド内の会話履歴をプロセス稼働中に保持）
-- コーパスに該当がない質問は **DuckDuckGo 検索 → LLM で要約 → コーパスへ保存** し、次回以降はナレッジとして検索可能
+- ベクトル DB に該当がない質問は **DuckDuckGo 検索 → LLM で要約**（`data/corpus/` へのローカル保存はしない。Supabase / Chroma への追記のみ）
 - **コンテンツフィルター機能**（LLM を使って質問が IT・プログラミング関連かを判定し、無関係な質問をフィルタリング）
+- **Slack 表示整形**（RAG / Web 回答を mrkdwn と Block Kit で投稿。見出し・表・出典を読みやすく表示。詳細は [docs/20260604-slack-mrkdwn-block-kit.md](docs/20260604-slack-mrkdwn-block-kit.md)）
 
 ## 非機能要件
 
@@ -23,17 +24,17 @@
 
 ## データソース要件
 
-- IPAが公開している過去問PDFやテキストデータ
-- IPAの公式シラバス、またはオープンなIT用語辞典などのデータ
+- ベクトル DB に投入済みの学習用テキスト（運用で管理。詳細は [docs/20260520-remove-local-corpus.md](docs/20260520-remove-local-corpus.md)）
+- Web 検索フォールバック（DuckDuckGo）
 
 ## システム構成・技術スタック
 
 - **言語**: Python 3.10 以上（`pyproject.toml` の `requires-python` に準拠。`X | Y` 型表記のため 3.9 非対応）
 - **Slack**: [slack-bolt](https://slack.dev/bolt-python/)（**Socket Mode**）
 - **ベクトルDB**: Chroma（ローカル永続、`CHROMA_PATH`）
-- **LLM / 埋め込み**: チャットは **Amazon Bedrock**（`USE_BEDROCK` または `BEDROCK_CHAT_MODEL_ID`）または **OpenAI 互換**（`AI_API_KEY`）。**埋め込み（ingest・RAG クエリ）は常に OpenAI 互換 API**（`AI_API_KEY`・`AI_EMBEDDING_MODEL` 等）。Bedrock 利用時も埋め込み用に `AI_API_KEY` が必要（詳細は `.env.example`）
+- **LLM / 埋め込み**: チャットは **Amazon Bedrock**（`USE_BEDROCK` または `BEDROCK_CHAT_MODEL_ID`）または **OpenAI 互換**（`AI_API_KEY`）。**埋め込み（RAG クエリ）は常に OpenAI 互換 API**（`AI_API_KEY`・`AI_EMBEDDING_MODEL` 等）。Bedrock 利用時も埋め込み用に `AI_API_KEY` が必要（詳細は `.env.example`）
 - **Web 検索フォールバック**: `ddgs`（DuckDuckGo、API キー不要）
-- **コーパス**: `data/corpus/*.md`。オリジナル教材に加え、IPA 公表 PDF から抽出した `ipa-*.md` を想定。利用上の留意点は [IPA FAQ（試験制度・その他）](https://www.ipa.go.jp/shiken/faq.html#seido) を確認すること。PDF の再取得・テキスト再生成は `python3 scripts/ipa_build_corpus.py --fetch`（詳細は [docs/20260405-ipa-corpus.md](docs/20260405-ipa-corpus.md)）。
+- **ベクトル DB**: Chroma（`CHROMA_PATH`）または Supabase（`SUPABASE_URL` / `SUPABASE_KEY`）。ローカル Markdown コーパス（旧 `data/corpus/`）は廃止。移行の背景は [docs/20260520-remove-local-corpus.md](docs/20260520-remove-local-corpus.md)。
 
 OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/20260513-bedrock-openai-replacement.md](docs/20260513-bedrock-openai-replacement.md) を参照。
 
@@ -64,17 +65,18 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    - `SLACK_TOKEN` … Bot User OAuth Token（`xoxb-`）
    - `SLACK_APP_TOKEN` … App-Level Token（Socket Mode 用、`xapp-`）
 
-   **RAG・ingest・Web 要約（Bedrock または OpenAI 互換）**
+   **RAG・Web 要約（Bedrock または OpenAI 互換）**
 
    - **バックエンドの優先**: `USE_BEDROCK=true`、または `BEDROCK_CHAT_MODEL_ID` を設定するとチャットは Bedrock。`USE_BEDROCK=false` で OpenAI 互換のみに固定。
    - **Bedrock（チャット）時**: AWS 認証、`AWS_REGION` または `AWS_DEFAULT_REGION`（既定 `ap-northeast-1`）、`BEDROCK_CHAT_MODEL_ID`（未設定時の既定は `anthropic.claude-3-5-haiku-20241022-v1:0`）。IAM の例: `bedrock:InvokeModel`、Converse 利用時は `bedrock:Converse`。**加えて埋め込み用に `AI_API_KEY`（および任意で `AI_BASE_URL`・`AI_EMBEDDING_MODEL`）が必須。** 東京リージョンで Claude Sonnet 4.6 など **geo 推論**のみの場合は、AWS のモデルカードに従い `BEDROCK_CHAT_MODEL_ID=jp.anthropic.claude-sonnet-4-6` のように **jp. 付き inference profile ID** を指定できるが、この場合は **AWS Marketplace 向け IAM**（`ViewSubscriptions` / `Subscribe`）が追加で必要になることがある（詳細は [docs/20260514-bedrock-chat-model-invalid.md](docs/20260514-bedrock-chat-model-invalid.md)、[docs/20260514-bedrock-marketplace-access.md](docs/20260514-bedrock-marketplace-access.md)）。
+   - `BEDROCK_EMBEDDING_MODEL_ID` … Bedrock 埋め込みモデルID（既定 `amazon.titan-embed-text-v2:0`。現状は主に互換・将来拡張向け）
+   - `BEDROCK_EMBEDDING_DIMENSIONS` … Bedrock 埋め込み次元（既定 `1024`）
    - **OpenAI 互換のみ（Bedrock 未使用）**: `AI_API_KEY`、任意で `AI_BASE_URL`、`AI_CHAT_MODEL`（既定 `gpt-4o-mini`）、`AI_EMBEDDING_MODEL`（既定 `text-embedding-3-small`）
-   - **埋め込み次元**: `AI_EMBEDDING_MODEL` を変えたら Chroma / pgvector の次元と一致させる。**モデルを変えたら `ingest` を再実行**すること。
+   - **埋め込み次元**: `AI_EMBEDDING_MODEL` を変えたら Chroma / pgvector の次元と一致させる。ベクトル DB の再投入が必要。
 
    **任意（パス・検索チューニング）**
 
-   - `CHROMA_PATH` … 既定 `./data/chroma`
-   - `CORPUS_DIR` … 既定 `./data/corpus`
+   - `CHROMA_PATH` … 既定 `./data/chroma`（`febot_corpus` コレクションが存在すること）
    - `RAG_TOP_K` … 参照チャンク数（既定 `5`）
    - `RAG_MAX_DISTANCE` … Chroma コサイン距離の上限（既定 `0.52`。`off` / `none` で無効化）
    - `RAG_POOL_MULT` … 距離フィルタ前に読む候補の倍率（既定 `5`）
@@ -84,9 +86,7 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    - `THREAD_HISTORY_MAX_TURNS` … スレッドあたりの会話履歴保持件数（既定 `10`。ボット再起動で消える）
    - `THREAD_MAX_SESSIONS` … インメモリで保持するスレッドセッション数の上限（既定 `500`）
    - `BEDROCK_CHAT_SKIP_CONVERSE` … `true` のときチャットは `InvokeModel` のみ（`Converse` を試さない。既定 `false`）
-   - `BEDROCK_EMBEDDING_MODEL_ID` … Bedrock で埋め込みを行う場合のモデル ID（既定は OpenAI 互換 API を使用。例: `amazon.titan-embed-text-v2:0`）
-   - `BEDROCK_EMBEDDING_DIMENSIONS` … Bedrock 埋め込みの次元数（既定 `1024`）
-   - `SUPABASE_URL` / `SUPABASE_KEY` … Supabase 移行スクリプト利用時に必要（通常運用では任意）
+   - `SUPABASE_URL` / `SUPABASE_KEY` … 設定時は Chroma の代わりに Supabase でベクトル検索（起動時の Chroma チェックはスキップ）
 
    最小例（Bedrock チャット＋OpenAI 埋め込み。本番は IAM ロール推奨）:
 
@@ -105,19 +105,9 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    AI_API_KEY=sk-...
    ```
 
-3. （任意）IPA 由来コーパスを公式サイトから取り直す場合は、ネットワークのある環境で次を実行する。生成物は `data/corpus/ipa-*.md`（`data/ipa_raw/` は `.gitignore` 対象）。
+3. RAG を使う場合は、AWS＋Bedrock チャット用設定に加え `AI_API_KEY`、または OpenAI 互換のみなら `AI_API_KEY` が揃っていること。あわせて **Chroma（`CHROMA_PATH` に `febot_corpus` コレクション）または Supabase にベクトルデータが投入済み**であること。新規環境では [docs/20260520-remove-local-corpus.md](docs/20260520-remove-local-corpus.md) を参照。
 
-   ```bash
-   python3 scripts/ipa_build_corpus.py --fetch
-   ```
-
-4. RAG を使う場合は、AWS＋Bedrock チャット用設定に加え `AI_API_KEY`、または OpenAI 互換のみなら `AI_API_KEY` が揃ったうえで、コーパスを埋め込み Chroma を生成する（**埋め込みモデルを変えたら再 ingest が必要**）。
-
-   ```bash
-   python3 scripts/ingest.py
-   ```
-
-5. ボットを起動する。
+4. ボットを起動する。
 
    ```bash
    python3 -m febot
@@ -146,19 +136,31 @@ Pull Request を出す前に、メンバー各自が次まで行う。
 
 PR がマージ可能になるには、GitHub Actions（`.github/workflows/ci-cd.yml`）と同じ基準をローカルでも満たすことが前提となる。
 
-- `ruff check` / `ruff format --check` 対象: `src/`、`scripts/`、`tests/`
-- `pytest`（複数 Python バージョンはワークフロー参照）
+**推奨（コミット・PR 前）:** `scripts/ci_local.py --fix` で Ruff の自動整形・安全な Lint 修正を行ったうえで、CI と同じ検証を一括実行する。`ruff format --check` だけを手動で回すと未整形のまま失敗しやすいため、先に `ruff format`（`--check` なし）を通すか、このスクリプトを使う。
 
 ```bash
 python3 -m pip install -e ".[dev]"
-python3 -m ruff format src/ scripts/ tests/
-python3 -m ruff check src/ scripts/ tests/
-python3 -m pytest
+python3 scripts/ci_local.py --fix
 ```
+
+`--fix` で直せない差分が残った場合は、表示されたファイルを手直ししてから `python3 scripts/ci_local.py`（検証のみ）を再実行する。
+
+### CI と同じ個別コマンド（参考）
+
+| 順 | 内容 | コマンド |
+|----|------|----------|
+| 0（任意） | 自動整形 | `python3 -m ruff format src scripts tests` |
+| 0（任意） | 安全な Lint 自動修正 | `python3 -m ruff check --fix src scripts tests` |
+| 1 | 同期チェック | `python3 scripts/check_sync.py` |
+| 2 | 整形確認（CI の Lint & format） | `python3 -m ruff format --check src scripts tests` |
+| 3 | Lint | `python3 -m ruff check src scripts tests` |
+| 4 | テスト | `python3 -m pytest` |
+
+`test` ジョブは Python 3.10 / 3.12 のマトリクス（ワークフロー参照）。ローカルは代表で 1 バージョン通ればよいが、互換性が気になる変更では両方試す。
 
 ## 実行時の挙動（要約）
 
-- **チャンネル**: ボットに **メンション**して質問。キーワード「過去問」「出題」「練習問題」で `sample-questions.md` から問題を出題し、**スレッド**で「ア」「イ」「ウ」「エ」に返信すると正誤と解説。
+- **チャンネル**: ボットに **メンション**して質問。キーワード「過去問」「出題」「練習問題」で `sample-questions.md` から問題を出題し、**選択肢ボタン**またはスレッドへの「ア」「イ」「ウ」「エ」返信で正誤と解説を返す。
 - **スレッド追質問**: ボットが一度応答したスレッドでは、メンションなしで追質問できる（会話履歴はプロセス稼働中のみ。再起動でリセット）。
 - **DM**: メンション不要。上記キーワードと RAG 質問が同様に使える。
 - **`/fe-quiz`**: スラッシュコマンドで問題を出題。引数なしで全問ランダム。オプション例:
@@ -166,7 +168,7 @@ python3 -m pytest
   - `/fe-quiz 科目B` または `/fe-quiz b` → 科目B（アルゴリズム）から出題
   - `/fe-quiz ネットワーク` など → 分野で絞り込み（OS / ネットワーク / データベース / セキュリティ / アルゴリズム / 表計算）
   - 出題後はスレッドに「ア」「イ」「ウ」「エ」で返信すると正誤と解説が表示される。
-- **RAG**: Chroma で類似チャンクを取得（距離しきい値・`glossary.md` ブーストあり）。埋め込みモデルを変えた場合は `RAG_MAX_DISTANCE` の再調整が必要になることがある。LLM が「参照抜粋にない」と判断した場合や、検索ヒットが無い場合は **Web 検索フォールバック**に進み、取得内容をコーパスに追記してから回答する。
+- **RAG**: Chroma または Supabase で類似チャンクを取得（`RAG_MAX_DISTANCE` で距離フィルタ）。LLM が「参照抜粋にない」と判断した場合や、検索ヒットが無い場合は **Web 検索フォールバック**に進む。Web 検索で得た内容は **Supabase / Chroma にのみ** 追記し、`data/corpus/` には保存しない。
 
 ## Slack アプリ側（概要）
 
@@ -174,10 +176,12 @@ python3 -m pytest
 - **Bot Token Scopes** の例: `app_mentions:read`, `chat:write`, `channels:history`, `im:history`（DM 利用時）
 - **プライベートチャンネル**でもスレッド追質問・採点を使う場合: `groups:history` と Event `message.groups` を追加
 - **Event Subscriptions**（必須）: `app_mention`, `message.channels`（スレッド追質問・練習問題の解答）, `message.im`
-- **Slash Commands**: `/fe-help`
+- **Interactivity**（必須）: 練習問題の選択肢ボタン用。Socket Mode 利用時は Socket Mode 経由で受信
+- **Slash Commands**: `/fe-help`, `/fe-format-test`（Block Kit 表示の目視テスト用。AI・RAG 不要）
 
 ### デプロイ後チェックリスト
 
 1. 上記 Event / Scope が Slack アプリに登録されていること（`message.channels` が無いと追質問・採点が届かない）
 2. ボットプロセスを再起動し、`feat/#31` 以降のビルドが動いていること
-3. チャンネルで `@FEbot 過去問` → スレッドに `イ` → 正誤。続けてメンションなしで追質問できること
+3. チャンネルで `@FEbot 過去問` → 選択肢ボタンまたはスレッドに `イ` → 正誤。続けてメンションなしで追質問できること
+4. 表示確認: `/fe-format-test` または `@FEbot フォーマットテスト`（太字・箇条書き・見出し・表・出典が意図どおりか）

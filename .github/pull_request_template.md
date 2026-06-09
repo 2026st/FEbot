@@ -19,4 +19,5 @@
 
 ## Verification
 
+- [ ] `python3 scripts/ci_local.py --fix` passed locally (or `python3 scripts/ci_local.py` if no Python changes)
 - How was this tested?
