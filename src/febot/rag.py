@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from collections import defaultdict, deque
@@ -14,8 +15,12 @@ from febot.llm_backend import get_llm_backend
 from febot.slack_format import SLACK_OUTPUT_RULES
 from febot.supabase_storage import SupabaseStorage
 from febot.thread_session import ChatTurn, build_user_content_with_history, embed_query_text
+from febot.web_search import urls_from_web_cache_content
 
 COLLECTION = "febot_corpus"
+
+CHUNK_SIZE = 900
+CHUNK_OVERLAP = 120
 
 SYSTEM_PROMPT = (
     """あなたは基本情報技術者試験（FE）の学習支援ボットです。
@@ -49,6 +54,30 @@ def build_rag_user_content(
         context=context,
         history=history,
     )
+
+
+def _chunk_text(text: str, source: str) -> list[tuple[str, dict[str, str]]]:
+    text = text.replace("\r\n", "\n").strip()
+    if not text:
+        return []
+    chunks: list[tuple[str, dict[str, str]]] = []
+    start = 0
+    n = len(text)
+    while start < n:
+        end = min(start + CHUNK_SIZE, n)
+        piece = text[start:end]
+        if end < n:
+            cut = piece.rfind("\n\n")
+            if cut > CHUNK_SIZE // 2:
+                piece = piece[:cut]
+                end = start + cut
+        piece = piece.strip()
+        if piece:
+            chunks.append((piece, {"source": source}))
+        if end >= n:
+            break
+        start = max(end - CHUNK_OVERLAP, start + 1)
+    return chunks
 
 
 def _rag_max_distance() -> float | None:
@@ -190,3 +219,36 @@ class RagEngine:
         if "参照抜粋にありません" in text:
             return None
         return RagAnswer(text=text, sources=source_names)
+
+    def citation_urls_for_source(self, source_name: str) -> list[str]:
+        """Extract citation URLs from a web_cache document stored in Supabase."""
+        if not source_name.startswith("web_cache_") or not self._storage:
+            return []
+        doc = self._storage.get_document_by_source(source_name)
+        if not doc:
+            return []
+        return urls_from_web_cache_content(doc.get("content", ""))
+
+    def add_to_corpus(self, content: str, source_name: str) -> None:
+        """Chunk, embed, and upsert into Supabase or Chroma (no local file)."""
+        chunks = _chunk_text(content, source_name)
+        if not chunks:
+            return
+
+        texts = [c[0] for c in chunks]
+        embeddings = self.llm.embed_texts(texts)
+
+        if self._storage:
+            doc_id = self._storage.upsert_document(source_name, content)
+            chunk_tuples = list(zip(texts, embeddings))
+            self._storage.upsert_chunks(doc_id, source_name, chunk_tuples)
+        else:
+            metas = [c[1] for c in chunks]
+            ids = []
+            for i, (text, meta) in enumerate(zip(texts, metas)):
+                src = meta["source"]
+                h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
+                ids.append(f"{src}_{i}_{h}")
+            self._collection.upsert(
+                ids=ids, documents=texts, metadatas=metas, embeddings=embeddings
+            )

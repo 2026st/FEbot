@@ -38,7 +38,7 @@ LLM は GitHub 風 Markdown（`#` 見出し、`**` 太字、`|` テーブル）�
 
 ## コーパス保存
 
-Web 検索フォールバックの `corpus_md` は従来どおり Markdown のまま（Slack 変換の対象外）。
+Web 検索フォールバックの `corpus_md` は Markdown のまま Supabase / Chroma に保存する（Slack 変換の対象外）。`data/corpus/` には書き込まない。
 
 ## 検証
 

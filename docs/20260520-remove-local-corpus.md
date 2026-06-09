@@ -8,7 +8,8 @@ IPA 公表 PDF から機械抽出した `data/corpus/ipa-*.md` および Web 検
 
 - `data/corpus/` ディレクトリ一式を削除
 - `data/ipa_manifest.yaml` および corpus 生成・ingest 用スクリプト（`ipa_build_corpus.py`, `ingest.py`, `migrate_to_supabase.py`, `extract_syllabus_yogo.py`）を削除
-- Web 検索後のローカルファイル保存・ベクトル自動追記（`add_to_corpus`）を廃止
+- Web 検索後のローカルファイル保存（`data/corpus/`）を廃止
+- Web 検索後のベクトル DB 自動追記（`add_to_corpus`）は **Supabase / Chroma のみ**（ローカル Markdown は書かない）
 - `glossary.md` 用語マッチブーストを廃止
 
 ## 維持しているもの

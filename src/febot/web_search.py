@@ -33,14 +33,29 @@ def search(query: str, max_results: int = 5) -> list[dict]:
         return []
 
 
+def build_corpus_markdown(question: str, answer_text: str, results: list[dict]) -> str:
+    urls = "\n".join(f"- {r.get('href', '')}" for r in results if r.get("href"))
+    return f"# Q: {question}\n\n{answer_text}\n\n## 参照URL\n{urls}\n"
+
+
+def urls_from_web_cache_content(content: str) -> list[str]:
+    urls: list[str] = []
+    for line in content.splitlines():
+        if line.startswith("- http"):
+            url = line.lstrip("- ").strip()
+            if url and url not in urls:
+                urls.append(url)
+    return urls
+
+
 def build_answer(
     llm: ChatEmbedBackend,
     question: str,
     results: list[dict],
     *,
     history: list[ChatTurn] | None = None,
-) -> str:
-    """Generate answer from web results using the configured LLM backend."""
+) -> tuple[str, str]:
+    """Generate answer from web results. Returns (slack_reply_text, corpus_markdown)."""
     context_parts = []
     for r in results:
         title = r.get("title", "")
@@ -56,9 +71,10 @@ def build_answer(
         question_heading="【質問】",
         context_heading="【Web検索結果】",
     )
-    return llm.chat(
+    answer_text = llm.chat(
         SEARCH_SYSTEM_PROMPT,
         user_content,
         temperature=0.3,
         max_tokens=None,
     )
+    return answer_text, build_corpus_markdown(question, answer_text, results)

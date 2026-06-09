@@ -200,15 +200,9 @@ def _handle_rag_question(
         citations = []
         for src in out.sources:
             if src.startswith("web_cache_"):
-                try:
-                    content = (settings.corpus_dir / src).read_text(encoding="utf-8")
-                    for line in content.splitlines():
-                        if line.startswith("- http"):
-                            url = line.lstrip("- ").strip()
-                            if url not in citations:
-                                citations.append(url)
-                except Exception:
-                    pass
+                for url in rag.citation_urls_for_source(src):
+                    if url not in citations:
+                        citations.append(url)
             else:
                 clean_src = src.split("（")[0] if "（" in src else src
                 link = f"https://github.com/2026st/FEbot/blob/main/data/corpus/{clean_src}"
@@ -234,7 +228,7 @@ def _handle_rag_question(
         return
 
     try:
-        slack_text = ws.build_answer(rag.llm, text, results, history=history or None)
+        slack_text, corpus_md = ws.build_answer(rag.llm, text, results, history=history or None)
     except Exception as e:
         log.exception("web answer build failed: %s", e)
         err_text = "Web検索結果の要約中にエラーが発生しました。"
