@@ -71,7 +71,7 @@ class OpenAICompatBackend:
 
 
 class BedrockChatOpenAIEmbedBackend:
-    """Bedrock for chat; OpenAI-compatible API for embeddings (RAG / ingest)."""
+    """Bedrock for chat; OpenAI-compatible API for embeddings (RAG)."""
 
     def __init__(self, settings: Settings) -> None:
         self._chat = BedrockClient(settings)
@@ -95,4 +95,9 @@ def get_llm_backend(settings: Settings) -> ChatEmbedBackend:
     """Bedrock chat if configured; embeddings always use OpenAI-compatible API when Bedrock is on."""
     if settings.use_bedrock:
         return BedrockChatOpenAIEmbedBackend(settings)
+    return OpenAICompatBackend(settings)
+
+
+def get_openai_compat_backend(settings: Settings) -> OpenAICompatBackend:
+    """OpenAI-compatible chat only (ignores USE_BEDROCK / Bedrock chat settings)."""
     return OpenAICompatBackend(settings)

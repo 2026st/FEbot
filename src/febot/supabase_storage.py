@@ -1,4 +1,4 @@
-"""Supabase storage layer for corpus documents and vector search."""
+"""Supabase storage layer for vector documents and search."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 
 class SupabaseStorage:
-    """Handles corpus document storage and vector search using Supabase."""
+    """Handles document storage and vector search using Supabase."""
 
     def __init__(self, url: str, key: str) -> None:
         """Initialize Supabase client.

@@ -3,6 +3,7 @@
 from febot.quiz import QuizItem
 from febot.slack_handlers import (
     ProcessedEvents,
+    parse_fe_quiz_command,
     session_key,
     text_mentions_bot,
     try_handle_quiz_reply,
@@ -62,3 +63,11 @@ def test_text_mentions_bot() -> None:
     assert text_mentions_bot("hi <@U123> there", "U123") is True
     assert text_mentions_bot("hi there", "U123") is False
     assert text_mentions_bot("hi", None) is False
+
+
+def test_parse_fe_quiz_command() -> None:
+    assert parse_fe_quiz_command("/fe-quiz") == ""
+    assert parse_fe_quiz_command("/fe-quiz 科目B") == "科目B"
+    assert parse_fe_quiz_command("/FE-QUIZ a") == "a"
+    assert parse_fe_quiz_command("過去問") is None
+    assert parse_fe_quiz_command("/fe-help") is None

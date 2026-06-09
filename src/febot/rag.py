@@ -4,30 +4,38 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from pathlib import Path
 
 import chromadb
 
 from febot.config import Settings
 from febot.llm_backend import get_llm_backend
+from febot.slack_format import SLACK_OUTPUT_RULES
 from febot.supabase_storage import SupabaseStorage
 from febot.thread_session import ChatTurn, build_user_content_with_history, embed_query_text
+from febot.web_search import urls_from_web_cache_content
 
 COLLECTION = "febot_corpus"
-GLOSSARY_FILE = "glossary.md"
 
 CHUNK_SIZE = 900
 CHUNK_OVERLAP = 120
 
-SYSTEM_PROMPT = """あなたは基本情報技術者試験（FE）の学習支援ボットです。
+SYSTEM_PROMPT = (
+    """あなたは基本情報技術者試験（FE）の学習支援ボットです。
 与えられた【参照抜粋】のみを根拠に、初学者でも分かるように丁寧に日本語で答えてください。
 参照抜粋に質問への答えが含まれない場合は推測せず、「この質問に答える記述は参照抜粋にありません」と述べてください。
 「glossary.md（用語マッチ）」の節があるときは、用語説明の質問ではそれを最優先の根拠にしてください。
-試験の正式な出題やIPA公式の解釈を断定しないでください。"""
+試験の正式な出題やIPA公式の解釈を断定しないでください。
+
+"""
+    + SLACK_OUTPUT_RULES
+)
+
+_EMPTY_VECTOR_MSG = (
+    "ベクトルストアにデータがありません。管理者にベクトル DB の投入を依頼してください。"
+)
 
 
 @dataclass
@@ -49,7 +57,6 @@ def build_rag_user_content(
 
 
 def _chunk_text(text: str, source: str) -> list[tuple[str, dict[str, str]]]:
-    """Chunk text into overlapping segments. Same logic as scripts/ingest.py."""
     text = text.replace("\r\n", "\n").strip()
     if not text:
         return []
@@ -71,67 +78,6 @@ def _chunk_text(text: str, source: str) -> list[tuple[str, dict[str, str]]]:
             break
         start = max(end - CHUNK_OVERLAP, start + 1)
     return chunks
-
-
-def _load_glossary_sections(corpus_dir: Path) -> list[tuple[str, str]]:
-    """(見出しタイトル, 節全文) のリスト。"""
-    path = corpus_dir / GLOSSARY_FILE
-    if not path.is_file():
-        return []
-    text = path.read_text(encoding="utf-8")
-    pattern = re.compile(r"^### (.+)$", re.MULTILINE)
-    matches = list(pattern.finditer(text))
-    sections: list[tuple[str, str]] = []
-    for i, m in enumerate(matches):
-        title = m.group(1).strip()
-        start = m.start()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        block = text[start:end].strip()
-        sections.append((title, block))
-    return sections
-
-
-def _question_tokens(question: str) -> set[str]:
-    toks: set[str] = set()
-    for m in re.finditer(r"[A-Za-z][A-Za-z0-9+./-]*", question):
-        toks.add(m.group(0).casefold())
-    for m in re.finditer(r"[\u3040-\u30ff\u4e00-\u9fff]{2,}", question):
-        toks.add(m.group(0))
-    return toks
-
-
-def _section_matches_tokens(section_text: str, tokens: set[str]) -> bool:
-    st = section_text.casefold()
-    for tok in tokens:
-        if len(tok) <= 1:
-            continue
-        if re.fullmatch(r"[a-z0-9+./-]+", tok):
-            if len(tok) >= 3:
-                if tok in st:
-                    return True
-            elif re.search(r"(?<![a-z0-9+./-])" + re.escape(tok) + r"(?![a-z0-9+./-])", st):
-                return True
-        elif tok in section_text:
-            return True
-    return False
-
-
-def _glossary_boost(
-    question: str, sections: list[tuple[str, str]], *, max_sections: int = 2
-) -> list[str]:
-    if not sections:
-        return []
-    tokens = _question_tokens(question)
-    if not tokens:
-        return []
-    out: list[str] = []
-    for _title, block in sections:
-        if _section_matches_tokens(block, tokens):
-            excerpt = block if len(block) <= 1400 else block[:1400] + "…"
-            out.append(excerpt)
-            if len(out) >= max_sections:
-                break
-    return out
 
 
 def _rag_max_distance() -> float | None:
@@ -171,7 +117,6 @@ class RagEngine:
         self._settings = settings
         self.llm = get_llm_backend(settings)
 
-        # Use Supabase if configured, otherwise fall back to Chroma
         if settings.use_supabase:
             self._storage = SupabaseStorage(settings.supabase_url, settings.supabase_key)
             self._chroma = None
@@ -182,7 +127,6 @@ class RagEngine:
             self._collection = self._chroma.get_collection(COLLECTION)
 
         self.limiter = RateLimiter(settings.rate_limit_per_minute)
-        self._glossary_sections = _load_glossary_sections(settings.corpus_dir)
 
     def answer(
         self,
@@ -191,7 +135,7 @@ class RagEngine:
         *,
         history: list[ChatTurn] | None = None,
     ) -> RagAnswer | None:
-        """Answer from corpus. Returns None if no relevant knowledge found (triggers web search fallback)."""
+        """Answer from vector store. Returns None if no relevant knowledge (web search fallback)."""
         if not self.limiter.allow(user_id):
             return RagAnswer(
                 text="利用が集中しています。1分ほど待ってから再度お試しください。",
@@ -201,15 +145,10 @@ class RagEngine:
         embed_text = embed_query_text(question, history)
         query_vector = self.llm.embed_texts([embed_text])[0]
 
-        # Use Supabase or Chroma based on configuration
         if self._storage:
-            # Supabase vector search
             n_docs = self._storage.count_chunks()
             if n_docs == 0:
-                return RagAnswer(
-                    text="コーパスが空です。`python3 scripts/migrate_to_supabase.py` を実行してください。",
-                    sources=[],
-                )
+                return RagAnswer(text=_EMPTY_VECTOR_MSG, sources=[])
 
             pool = _rag_pool_size(self._settings.rag_top_k)
             max_d = _rag_max_distance()
@@ -223,13 +162,9 @@ class RagEngine:
                 if len(picked) >= self._settings.rag_top_k:
                     break
         else:
-            # Chroma vector search (legacy)
             n_docs = self._collection.count()
             if n_docs == 0:
-                return RagAnswer(
-                    text="コーパスが空です。`python3 scripts/ingest.py` を実行してください。",
-                    sources=[],
-                )
+                return RagAnswer(text=_EMPTY_VECTOR_MSG, sources=[])
 
             pool = _rag_pool_size(self._settings.rag_top_k)
             res = self._collection.query(
@@ -244,7 +179,7 @@ class RagEngine:
 
             max_d = _rag_max_distance()
             use_dist = max_d is not None and len(dists) == len(docs)
-            picked: list[tuple[str, str, dict]] = []
+            picked = []
             for doc, meta, dist in zip(
                 docs,
                 metas,
@@ -257,27 +192,13 @@ class RagEngine:
                 if len(picked) >= self._settings.rag_top_k:
                     break
 
-        gloss_excerpts = _glossary_boost(question, self._glossary_sections)
-
-        # No knowledge found: neither vector results nor glossary match passed threshold
-        if not picked and not gloss_excerpts:
+        if not picked:
             return None
 
         parts: list[str] = []
         source_names: list[str] = []
 
-        for gex in gloss_excerpts:
-            label = f"{GLOSSARY_FILE}（用語マッチ）"
-            parts.append(f"### {label}\n{gex}")
-            if label not in source_names:
-                source_names.append(label)
-
-        vec_cap = (
-            self._settings.rag_top_k
-            if not gloss_excerpts
-            else max(1, min(4, self._settings.rag_top_k))
-        )
-        for doc, src, _meta in picked[:vec_cap]:
+        for doc, src, _meta in picked:
             excerpt = doc.strip() if doc else ""
             if len(excerpt) > 700:
                 excerpt = excerpt[:700] + "…"
@@ -285,7 +206,7 @@ class RagEngine:
             if src not in source_names:
                 source_names.append(src)
 
-        context = "\n\n".join(parts) if parts else "（参照なし）"
+        context = "\n\n".join(parts)
 
         user_content = build_rag_user_content(question, context, history)
 
@@ -295,39 +216,39 @@ class RagEngine:
             temperature=0.2,
             max_tokens=None,
         )
-        # LLM explicitly said the corpus has no relevant info → fall through to web search
         if "参照抜粋にありません" in text:
             return None
         return RagAnswer(text=text, sources=source_names)
 
-    def add_to_corpus(self, content: str, source_name: str) -> None:
-        """Chunk, embed, and upsert into Supabase/Chroma. Also saves file to corpus dir."""
-        # Always save to local file system for backup
-        file_path = self._settings.corpus_dir / source_name
-        file_path.write_text(content, encoding="utf-8")
+    def citation_urls_for_source(self, source_name: str) -> list[str]:
+        """Extract citation URLs from a web_cache document stored in Supabase."""
+        if not source_name.startswith("web_cache_") or not self._storage:
+            return []
+        doc = self._storage.get_document_by_source(source_name)
+        if not doc:
+            return []
+        return urls_from_web_cache_content(doc.get("content", ""))
 
+    def add_to_corpus(self, content: str, source_name: str) -> None:
+        """Chunk, embed, and upsert into Supabase or Chroma (no local file)."""
         chunks = _chunk_text(content, source_name)
         if not chunks:
             return
 
         texts = [c[0] for c in chunks]
-
         embeddings = self.llm.embed_texts(texts)
 
         if self._storage:
-            # Save to Supabase
             doc_id = self._storage.upsert_document(source_name, content)
             chunk_tuples = list(zip(texts, embeddings))
             self._storage.upsert_chunks(doc_id, source_name, chunk_tuples)
         else:
-            # Save to Chroma (legacy)
             metas = [c[1] for c in chunks]
             ids = []
             for i, (text, meta) in enumerate(zip(texts, metas)):
                 src = meta["source"]
                 h = hashlib.sha256(f"{src}:{i}:{text[:80]}".encode()).hexdigest()[:24]
                 ids.append(f"{src}_{i}_{h}")
-            # Use upsert so repeated identical questions don't cause duplicate-ID errors
             self._collection.upsert(
                 ids=ids, documents=texts, metadatas=metas, embeddings=embeddings
             )

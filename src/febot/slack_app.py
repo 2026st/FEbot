@@ -1,4 +1,4 @@
-"""Slack Bolt app: Socket Mode, mentions, DM, quiz threads, /fe-help."""
+"""Slack Bolt app: Socket Mode, mentions, DM, quiz threads, /fe-help, /fe-format-test."""
 
 from __future__ import annotations
 
@@ -16,15 +16,33 @@ from febot import web_search as ws
 from febot.bedrock_errors import slack_reply_for_bedrock_access_error
 from febot.config import Settings
 from febot.content_filter import ContentFilter
-from febot.quiz import QuizItem, load_quiz_items, pick_random
+from febot.quiz import (
+    QuizItem,
+    load_quiz_items_from_supabase,
+    pick_filtered,
+    pick_random,
+)
 from febot.rag import RagEngine
+from febot.slack_format import (
+    FORMAT_TEST_FOOTER,
+    build_slack_blocks,
+    format_reply_for_history,
+    format_test_sample_body,
+    wants_format_test,
+)
 from febot.slack_handlers import (
     ProcessedEvents,
+    build_quiz_message,
+    format_quiz_history,
+    handle_quiz_button,
+    parse_fe_quiz_command,
+    quiz_filter_miss_message,
     session_key,
     text_mentions_bot,
     try_handle_percent_command,
     try_handle_quiz_reply,
 )
+from febot.supabase_quiz import SupabaseQuizStore
 from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_from_event
 
 log = logging.getLogger(__name__)
@@ -33,17 +51,16 @@ QUIZ_KEYWORDS = ("過去問", "出題", "練習問題")
 
 _THINKING_MESSAGES = [
     "🤔 thinking...",
-    "📚 コーパスをあさり中...",
-    "🔍 知識の海を泳いでいます...",
+    "🔍 ナレッジベースを検索中...",
     "⚙️ RAGエンジン起動中...",
     "🧠 基本情報技術者試験ボット、全力稼働中...",
 ]
 
 NO_AI_REPLY = (
     "RAG（用語解説・生成回答）を使う設定がありません。\n"
-    "• Bedrock（チャット）: `BEDROCK_CHAT_MODEL_ID` と AWS 認証に加え、埋め込み用に `AI_API_KEY` を設定し "
-    "`python3 scripts/ingest.py` を実行してください。\n"
-    "• OpenAI 互換のみ: `USE_BEDROCK=false` にするか Bedrock 用チャット ID を空にし、`AI_API_KEY` を設定して ingest してください。"
+    "• Bedrock（チャット）: `BEDROCK_CHAT_MODEL_ID` と AWS 認証に加え、埋め込み用に `AI_API_KEY` を設定してください。\n"
+    "• OpenAI 互換のみ: `USE_BEDROCK=false` にするか Bedrock 用チャット ID を空にし、`AI_API_KEY` を設定してください。\n"
+    "• ベクトル DB（Chroma または Supabase）が投入済みである必要があります。"
 )
 
 
@@ -52,11 +69,18 @@ def _help_text(settings: Settings) -> str:
         "*FE 学習ボット（RAG / PoC）*\n\n"
         "• チャンネルでは *@ボット* にメンションして質問（用語・学習の相談など）\n"
         "• DM でも同じように送れます\n"
-        "• 「過去問」「出題」「練習問題」と書くと *オリジナル練習問題* を出します（スレッドに解答）\n"
+        "• 「過去問」「出題」「練習問題」と書くと *IPA公式過去問* を出します（多肢対応・図表付き・選択肢ボタン）\n"
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
         "• ヘルプ: メッセージで `%help` または `%febot-help`（チャンネルでは @ボット と併用）。Slack では `/fe-help` も利用可\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
-        "• コーパスには IPA 公表 PDF から抽出した `ipa-*.md` とオリジナル教材があります。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
+        "• 過去問は IPA 公表 PDF 由来（Supabase 保存）。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
+        "\n*スラッシュコマンド*\n"
+        "• `/fe-quiz` — 全問からランダム出題\n"
+        "• `/fe-quiz 科目A` または `/fe-quiz a` — 科目A（知識問題）から出題\n"
+        "• `/fe-quiz 科目B` または `/fe-quiz b` — 科目B（アルゴリズム）から出題\n"
+        "• `/fe-quiz ネットワーク` など — 分野名で絞り込み出題\n"
+        "  （分野例: OS、ネットワーク、データベース、セキュリティ、アルゴリズム、表計算）\n"
+        "• *表示確認*: `/fe-format-test` またはメンション/DM で `フォーマットテスト` / `表示テスト`（AI 不要）\n"
     )
     if not settings.rag_enabled():
         return base + (
@@ -84,15 +108,6 @@ def _wants_quiz(text: str) -> bool:
     return any(k in text for k in QUIZ_KEYWORDS)
 
 
-def _format_quiz(q: QuizItem) -> str:
-    return (
-        f"【練習問題】`{q.qid}` ({q.qtype})\n"
-        f"{q.body}\n\n"
-        f"{q.choices}\n\n"
-        "答えはこのスレッドに「ア」「イ」「ウ」「エ」で返信してください。"
-    )
-
-
 def _make_cache_filename(question: str) -> str:
     date = datetime.date.today().isoformat()
     slug = re.sub(r"[^\w\u3040-\u30ff\u4e00-\u9fff]", "_", question[:40]).strip("_")
@@ -112,9 +127,40 @@ def _event_already_processed(state: BotState, event: dict) -> bool:
     return state.processed_events.was_processed(event["channel"], event["ts"])
 
 
+def _post_format_test(say, **kwargs) -> None:
+    """Post fixed sample via Block Kit (same path as RAG answers)."""
+    _say_formatted(say, format_test_sample_body(), footer=FORMAT_TEST_FOOTER, **kwargs)
+
+
+def _respond_format_test(respond) -> None:
+    body = format_test_sample_body()
+    fallback, blocks = build_slack_blocks(body, footer=FORMAT_TEST_FOOTER)
+    if blocks:
+        respond(text=fallback, blocks=blocks)
+    else:
+        respond(fallback)
+
+
+def _say_formatted(
+    say,
+    body: str,
+    *,
+    sources: list[str] | None = None,
+    footer: str | None = None,
+    **kwargs,
+) -> str:
+    """Post RAG answer with Slack Block Kit + mrkdwn; returns text stored in session."""
+    fallback, blocks = build_slack_blocks(body, footer=footer, sources=sources)
+    history_text = format_reply_for_history(body, sources=sources, footer=footer)
+    if blocks:
+        say(fallback, blocks=blocks, **kwargs)
+    else:
+        say(fallback, **kwargs)
+    return history_text
+
+
 def _handle_rag_question(
     rag: RagEngine,
-    settings: Settings,
     state: BotState,
     session_key_str: str,
     text: str,
@@ -122,7 +168,7 @@ def _handle_rag_question(
     say,
     thread_ts: str | None = None,
 ) -> None:
-    """RAG → Web search fallback → corpus save → reply."""
+    """RAG → Web search fallback → reply."""
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
     history = state.sessions.history_for_prompt(session_key_str)
     state.sessions.append_user(session_key_str, text)
@@ -145,26 +191,22 @@ def _handle_rag_question(
         citations = []
         for src in out.sources:
             if src.startswith("web_cache_"):
-                try:
-                    content = (settings.corpus_dir / src).read_text(encoding="utf-8")
-                    for line in content.splitlines():
-                        if line.startswith("- http"):
-                            url = line.lstrip("- ").strip()
-                            if url not in citations:
-                                citations.append(url)
-                except Exception:
-                    pass
+                for url in rag.citation_urls_for_source(src):
+                    if url not in citations:
+                        citations.append(url)
             else:
                 clean_src = src.split("（")[0] if "（" in src else src
                 link = f"https://github.com/2026st/FEbot/blob/main/data/corpus/{clean_src}"
                 if link not in citations:
                     citations.append(link)
 
-        if citations:
-            reply_text += "\n\n【出典】\n" + "\n".join(f"- {c}" for c in citations)
-
-        say(reply_text, **kwargs)
-        state.sessions.append_assistant(session_key_str, reply_text)
+        history_text = _say_formatted(
+            say,
+            reply_text,
+            sources=citations or None,
+            **kwargs,
+        )
+        state.sessions.append_assistant(session_key_str, history_text)
         return
 
     say("ナレッジベースに情報が見つかりませんでした。Webを検索中です...", **kwargs)
@@ -190,9 +232,14 @@ def _handle_rag_question(
     except Exception as e:
         log.warning("corpus save failed (non-fatal): %s", e)
 
-    full_reply = slack_text + "\n\n_（Web検索より取得。次回からはナレッジベースで回答します）_"
-    say(full_reply, **kwargs)
-    state.sessions.append_assistant(session_key_str, full_reply)
+    web_footer = "_（Web検索より取得。次回からはナレッジベースで回答します）_"
+    history_text = _say_formatted(
+        say,
+        slack_text,
+        footer=web_footer,
+        **kwargs,
+    )
+    state.sessions.append_assistant(session_key_str, history_text)
 
 
 def _post_quiz(
@@ -201,23 +248,25 @@ def _post_quiz(
     say,
     *,
     thread_ts: str | None,
+    option: str = "",
 ) -> None:
-    item = pick_random(state.quiz_items)
+    item = pick_filtered(state.quiz_items, option) if option else pick_random(state.quiz_items)
     if not item:
-        say("練習問題データが見つかりません。", thread_ts=thread_ts)
+        msg = quiz_filter_miss_message(option) if option else "練習問題データが見つかりません。"
+        say(msg, thread_ts=thread_ts)
         return
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
-    quiz_text = _format_quiz(item)
-    say(quiz_text, **kwargs)
-    key = thread_key(event["channel"], thread_ts or event["ts"])
+    fallback, blocks = build_quiz_message(item)
+    resp = say(fallback, blocks=blocks, **kwargs)
+    root = thread_ts or resp.get("ts") or event["ts"]
+    key = thread_key(event["channel"], root)
     state.sessions.set_quiz(key, item)
-    state.sessions.append_assistant(key, quiz_text)
+    state.sessions.append_assistant(key, format_quiz_history(item))
 
 
 def _run_rag_if_allowed(
     rag: RagEngine | None,
     content_filter: ContentFilter | None,
-    settings: Settings,
     state: BotState,
     event: dict,
     text: str,
@@ -241,7 +290,6 @@ def _run_rag_if_allowed(
             return
     _handle_rag_question(
         rag,
-        settings,
         state,
         session_key(event),
         text,
@@ -251,12 +299,30 @@ def _run_rag_if_allowed(
     )
 
 
+def _load_quiz_for_bot(settings: Settings) -> list[QuizItem]:
+    """Load quiz items from Supabase (required for /fe-quiz)."""
+    if not settings.use_supabase:
+        raise RuntimeError(
+            "練習問題出題には SUPABASE_URL と SUPABASE_KEY が必要です。"
+            "Supabase に ingest 後、ボットを再起動してください。"
+        )
+    store = SupabaseQuizStore(settings.supabase_url, settings.supabase_key)
+    items = load_quiz_items_from_supabase(store)
+    if not items:
+        raise RuntimeError(
+            "Supabase に練習問題がありません。"
+            "python scripts/ipa_ingest_quiz.py ingest --all を実行してください。"
+        )
+    log.info("Loaded %d quiz items from Supabase", len(items))
+    return items
+
+
 def create_app(settings: Settings) -> tuple[App, BotState]:
     rag: RagEngine | None = RagEngine(settings) if settings.rag_enabled() else None
     content_filter: ContentFilter | None = (
         ContentFilter(settings) if settings.rag_enabled() else None
     )
-    state = BotState(quiz_items=load_quiz_items(settings.corpus_dir))
+    state = BotState(quiz_items=_load_quiz_for_bot(settings))
 
     app = App(token=settings.slack_token)
     try:
@@ -270,6 +336,43 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
     def fe_help(ack, respond):
         ack()
         respond(_help_text(settings))
+
+    @app.command("/fe-quiz")
+    def fe_quiz_cmd(ack, command, client, respond, logger):
+        ack()
+        option = (command.get("text") or "").strip()
+        item = pick_filtered(state.quiz_items, option)
+        if not item:
+            respond(
+                quiz_filter_miss_message(option) if option else "練習問題データが見つかりません。"
+            )
+            return
+        channel_id = command["channel_id"]
+        fallback, blocks = build_quiz_message(item)
+        try:
+            result = client.chat_postMessage(
+                channel=channel_id,
+                text=fallback,
+                blocks=blocks,
+            )
+            ts = result.get("ts")
+            if ts:
+                key = thread_key(channel_id, ts)
+                state.sessions.set_quiz(key, item)
+                state.sessions.append_assistant(key, format_quiz_history(item))
+        except Exception as e:
+            logger.exception("fe_quiz_cmd chat_postMessage failed: %s", e)
+            respond("問題の投稿中にエラーが発生しました。")
+
+    @app.command("/fe-format-test")
+    def fe_format_test(ack, respond):
+        ack()
+        _respond_format_test(respond)
+
+    @app.action({"action_id": re.compile(r"^quiz_answer_")})
+    def on_quiz_answer(ack, body, say):
+        ack()
+        handle_quiz_button(state.sessions, body, say)
 
     @app.event("app_mention")
     def on_mention(event, say, logger):
@@ -288,13 +391,19 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
         if event.get("thread_ts") and try_handle_quiz_reply(state.sessions, event, text, say):
             return
+        if wants_format_test(text):
+            _post_format_test(say, thread_ts=reply_ts)
+            return
+        fe_quiz_option = parse_fe_quiz_command(text)
+        if fe_quiz_option is not None:
+            _post_quiz(state, event, say, thread_ts=reply_ts, option=fe_quiz_option)
+            return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
             return
         _run_rag_if_allowed(
             rag,
             content_filter,
-            settings,
             state,
             event,
             text,
@@ -339,18 +448,20 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if in_thread and bot_active:
             if not text:
                 return
-            if try_handle_percent_command(
-                text,
-                help_text=_help_text(settings),
-                say=say,
-                thread_ts=thread_ts,
-            ):
+            fe_quiz_option = parse_fe_quiz_command(text)
+            if fe_quiz_option is not None:
+                _post_quiz(
+                    state,
+                    event,
+                    say,
+                    thread_ts=thread_ts,
+                    option=fe_quiz_option,
+                )
                 _mark_event_processed(state, event)
                 return
             _run_rag_if_allowed(
                 rag,
                 content_filter,
-                settings,
                 state,
                 event,
                 text,
@@ -368,28 +479,19 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
 
         if not text:
             return
-        if try_handle_percent_command(
-            text,
-            help_text=_help_text(settings),
-            say=say,
-        ):
+        if wants_format_test(text):
+            _post_format_test(say)
+            return
+        fe_quiz_option = parse_fe_quiz_command(text)
+        if fe_quiz_option is not None:
+            _post_quiz(state, event, say, thread_ts=None, option=fe_quiz_option)
             return
         if _wants_quiz(text):
-            item = pick_random(state.quiz_items)
-            if not item:
-                say("練習問題データが見つかりません。")
-                return
-            quiz_text = _format_quiz(item)
-            resp = say(quiz_text)
-            quiz_root = resp.get("ts") or event["ts"]
-            dm_key = thread_key(event["channel"], quiz_root)
-            state.sessions.set_quiz(dm_key, item)
-            state.sessions.append_assistant(dm_key, quiz_text)
+            _post_quiz(state, event, say, thread_ts=None)
             return
         _run_rag_if_allowed(
             rag,
             content_filter,
-            settings,
             state,
             event,
             text,
@@ -412,20 +514,25 @@ def run() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = Settings.load()
     if settings.rag_enabled():
-        try:
-            chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(COLLECTION)
-        except Exception as e:
-            log.error(
-                "Chroma collection %r not found under %s. Run: python scripts/ingest.py (%s)",
-                COLLECTION,
-                settings.chroma_path,
-                e,
-            )
-            raise SystemExit(1) from e
+        if settings.use_supabase:
+            log.info("Using Supabase for vector search (Chroma startup check skipped)")
+        else:
+            try:
+                chromadb.PersistentClient(path=str(settings.chroma_path)).get_collection(COLLECTION)
+            except Exception as e:
+                log.error(
+                    "Chroma collection %r not found under %s. "
+                    "Ensure vector data exists at CHROMA_PATH (%s)",
+                    COLLECTION,
+                    settings.chroma_path,
+                    e,
+                )
+                raise SystemExit(1) from e
     else:
         log.warning(
-            "RAG 用の認証が無いため Chroma をスキップします（Slack のみ接続確認モード）。"
-            "Bedrock 利用時は AWS 認証に加え埋め込み用の AI_API_KEY が必要。OpenAI 互換のみなら AI_API_KEY を設定し ingest を実行してください。"
+            "RAG 用の認証が無いためベクトル DB チェックをスキップします（Slack のみ接続確認モード）。"
+            "Bedrock 利用時は AWS 認証に加え埋め込み用の AI_API_KEY が必要。"
+            "OpenAI 互換のみなら AI_API_KEY を設定し、ベクトル DB を用意してください。"
         )
     app, _state = create_app(settings)
     handler = SocketModeHandler(app, settings.slack_app_token)

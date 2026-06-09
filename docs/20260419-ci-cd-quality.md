@@ -18,8 +18,23 @@
 
 既存の `deploy` ジョブは変更しない。品質ジョブ（`lint`・`test`）が成功した `main` への push のみ SSH デプロイする。
 
+## ローカル実行
+
+CI の `lint` ジョブと `pytest` をまとめて再現するスクリプトを用意している。
+
+```bash
+python3 -m pip install -e ".[dev,ingest]"
+python3 scripts/ci_local.py --fix
+```
+
+- `--fix`: `ruff format` と `ruff check --fix` を先に実行し、その後 `check_sync`・`ruff format --check`・`ruff check`・`pytest` を順に実行する。
+- 引数なし: 検証のみ（CI と同じコマンド列）。
+
+`ruff format --check` 単体では未整形ファイルで必ず失敗する。PR 前は `--fix` 付きで回すか、手動で `ruff format` を先に実行する。
+
 ## メンテナンスの指針
 
 - ルール追加は `pyproject.toml` の `[tool.ruff.lint]` で行い、ローカルで `python -m ruff check ...` と一致させる。
+- CI ワークフローのチェック順を変えたら `scripts/ci_local.py` も同期する。
 - テストは `tests/` に追加し、`pytest` が収集できるようにする。
 - Actions のバージョンは Dependabot が週次で提案する。セキュリティパッチはマージ判断を優先する。

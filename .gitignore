@@ -8,5 +8,7 @@ dist/
 build/
 data/chroma/
 data/ipa_raw/
+data/.ipa_cache/
 .DS_Store
 .cursor/
+.claudecodeconfig
