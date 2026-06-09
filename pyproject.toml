@@ -17,12 +17,16 @@ dependencies = [
   "pypdf>=5.0.0",
   "PyYAML>=6.0.0",
   "supabase>=2.0.0",
+  "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "ruff>=0.6.0",
   "pytest>=8.0",
+]
+ingest = [
+  "pymupdf>=1.24.0",
 ]
 
 [tool.setuptools.packages.find]

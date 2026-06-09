@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import datetime
-import json
 import logging
 import os
 import random
 import re
-import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -19,7 +16,12 @@ from febot import web_search as ws
 from febot.bedrock_errors import slack_reply_for_bedrock_access_error
 from febot.config import Settings
 from febot.content_filter import ContentFilter
-from febot.quiz import QuizItem, load_quiz_items, pick_random
+from febot.quiz import (
+    QuizItem,
+    load_quiz_items_from_supabase,
+    pick_filtered,
+    pick_random,
+)
 from febot.rag import RagEngine
 from febot.slack_format import (
     FORMAT_TEST_FOOTER,
@@ -33,35 +35,16 @@ from febot.slack_handlers import (
     build_quiz_message,
     format_quiz_history,
     handle_quiz_button,
+    parse_fe_quiz_command,
+    quiz_filter_miss_message,
     session_key,
     text_mentions_bot,
     try_handle_quiz_reply,
 )
+from febot.supabase_quiz import SupabaseQuizStore
 from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_from_event
 
 log = logging.getLogger(__name__)
-
-# #region agent log
-_DEBUG_LOG = Path(__file__).resolve().parents[2] / "debug-1c457e.log"
-
-
-def _agent_debug(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    try:
-        payload = {
-            "sessionId": "1c457e",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with _DEBUG_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-# #endregion
 
 QUIZ_KEYWORDS = ("過去問", "出題", "練習問題")
 
@@ -85,10 +68,16 @@ def _help_text(settings: Settings) -> str:
         "*FE 学習ボット（RAG / PoC）*\n\n"
         "• チャンネルでは *@ボット* にメンションして質問（用語・学習の相談など）\n"
         "• DM でも同じように送れます\n"
-        "• 「過去問」「出題」「練習問題」と書くと *オリジナル練習問題* を出します（選択肢ボタンまたはスレッドで解答）\n"
+        "• 「過去問」「出題」「練習問題」と書くと *IPA公式過去問* を出します（多肢対応・図表付き・選択肢ボタン）\n"
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
-        "• コーパスには IPA 公表 PDF から抽出した `ipa-*.md` とオリジナル教材があります。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
+        "• 過去問は IPA 公表 PDF 由来（Supabase 保存）。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
+        "\n*スラッシュコマンド*\n"
+        "• `/fe-quiz` — 全問からランダム出題\n"
+        "• `/fe-quiz 科目A` または `/fe-quiz a` — 科目A（知識問題）から出題\n"
+        "• `/fe-quiz 科目B` または `/fe-quiz b` — 科目B（アルゴリズム）から出題\n"
+        "• `/fe-quiz ネットワーク` など — 分野名で絞り込み出題\n"
+        "  （分野例: OS、ネットワーク、データベース、セキュリティ、アルゴリズム、表計算）\n"
         "• *表示確認*: `/fe-format-test` またはメンション/DM で `フォーマットテスト` / `表示テスト`（AI 不要）\n"
     )
     if not settings.rag_enabled():
@@ -257,10 +246,12 @@ def _post_quiz(
     say,
     *,
     thread_ts: str | None,
+    option: str = "",
 ) -> None:
-    item = pick_random(state.quiz_items)
+    item = pick_filtered(state.quiz_items, option) if option else pick_random(state.quiz_items)
     if not item:
-        say("練習問題データが見つかりません。", thread_ts=thread_ts)
+        msg = quiz_filter_miss_message(option) if option else "練習問題データが見つかりません。"
+        say(msg, thread_ts=thread_ts)
         return
     kwargs = {"thread_ts": thread_ts} if thread_ts else {}
     fallback, blocks = build_quiz_message(item)
@@ -283,14 +274,6 @@ def _run_rag_if_allowed(
     filtered_msg: str,
 ) -> None:
     if rag is None:
-        # #region agent log
-        _agent_debug(
-            "A",
-            "slack_app.py:_run_rag_if_allowed",
-            "rag is None, posting NO_AI_REPLY",
-            {"text_len": len(text), "thread_ts": thread_ts},
-        )
-        # #endregion
         say(NO_AI_REPLY, thread_ts=thread_ts)
         return
     if content_filter is not None:
@@ -314,12 +297,30 @@ def _run_rag_if_allowed(
     )
 
 
+def _load_quiz_for_bot(settings: Settings) -> list[QuizItem]:
+    """Load quiz items from Supabase (required for /fe-quiz)."""
+    if not settings.use_supabase:
+        raise RuntimeError(
+            "練習問題出題には SUPABASE_URL と SUPABASE_KEY が必要です。"
+            "Supabase に ingest 後、ボットを再起動してください。"
+        )
+    store = SupabaseQuizStore(settings.supabase_url, settings.supabase_key)
+    items = load_quiz_items_from_supabase(store)
+    if not items:
+        raise RuntimeError(
+            "Supabase に練習問題がありません。"
+            "python scripts/ipa_ingest_quiz.py ingest --all を実行してください。"
+        )
+    log.info("Loaded %d quiz items from Supabase", len(items))
+    return items
+
+
 def create_app(settings: Settings) -> tuple[App, BotState]:
     rag: RagEngine | None = RagEngine(settings) if settings.rag_enabled() else None
     content_filter: ContentFilter | None = (
         ContentFilter(settings) if settings.rag_enabled() else None
     )
-    state = BotState(quiz_items=load_quiz_items())
+    state = BotState(quiz_items=_load_quiz_for_bot(settings))
 
     app = App(token=settings.slack_token)
     try:
@@ -334,31 +335,45 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         ack()
         respond(_help_text(settings))
 
+    @app.command("/fe-quiz")
+    def fe_quiz_cmd(ack, command, client, respond, logger):
+        ack()
+        option = (command.get("text") or "").strip()
+        item = pick_filtered(state.quiz_items, option)
+        if not item:
+            respond(
+                quiz_filter_miss_message(option) if option else "練習問題データが見つかりません。"
+            )
+            return
+        channel_id = command["channel_id"]
+        fallback, blocks = build_quiz_message(item)
+        try:
+            result = client.chat_postMessage(
+                channel=channel_id,
+                text=fallback,
+                blocks=blocks,
+            )
+            ts = result.get("ts")
+            if ts:
+                key = thread_key(channel_id, ts)
+                state.sessions.set_quiz(key, item)
+                state.sessions.append_assistant(key, format_quiz_history(item))
+        except Exception as e:
+            logger.exception("fe_quiz_cmd chat_postMessage failed: %s", e)
+            respond("問題の投稿中にエラーが発生しました。")
+
     @app.command("/fe-format-test")
     def fe_format_test(ack, respond):
         ack()
         _respond_format_test(respond)
 
-    @app.action("quiz_answer")
+    @app.action({"action_id": re.compile(r"^quiz_answer_")})
     def on_quiz_answer(ack, body, say):
         ack()
         handle_quiz_button(state.sessions, body, say)
 
     @app.event("app_mention")
     def on_mention(event, say, logger):
-        # #region agent log
-        _agent_debug(
-            "B",
-            "slack_app.py:on_mention",
-            "app_mention received",
-            {
-                "channel": event.get("channel"),
-                "channel_type": event.get("channel_type"),
-                "has_thread_ts": bool(event.get("thread_ts")),
-                "text_preview": (event.get("text") or "")[:80],
-            },
-        )
-        # #endregion
         _mark_event_processed(state, event)
         text = _strip_mentions(event.get("text", ""))
         reply_ts = _reply_thread_ts(event)
@@ -370,17 +385,13 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if wants_format_test(text):
             _post_format_test(say, thread_ts=reply_ts)
             return
+        fe_quiz_option = parse_fe_quiz_command(text)
+        if fe_quiz_option is not None:
+            _post_quiz(state, event, say, thread_ts=reply_ts, option=fe_quiz_option)
+            return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
             return
-        # #region agent log
-        _agent_debug(
-            "B",
-            "slack_app.py:on_mention",
-            "mention RAG path",
-            {"text_preview": text[:80], "reply_ts": reply_ts},
-        )
-        # #endregion
         _run_rag_if_allowed(
             rag,
             content_filter,
@@ -408,14 +419,6 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
 
         if _event_already_processed(state, event):
-            # #region agent log
-            _agent_debug(
-                "C",
-                "slack_app.py:on_message",
-                "skipped: already processed by app_mention",
-                {"channel": event.get("channel"), "ts": event.get("ts")},
-            )
-            # #endregion
             return
 
         ch_type = event.get("channel_type")
@@ -436,14 +439,17 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if in_thread and bot_active:
             if not text:
                 return
-            # #region agent log
-            _agent_debug(
-                "B",
-                "slack_app.py:on_message",
-                "thread follow-up RAG path",
-                {"key": key, "text_preview": text[:80]},
-            )
-            # #endregion
+            fe_quiz_option = parse_fe_quiz_command(text)
+            if fe_quiz_option is not None:
+                _post_quiz(
+                    state,
+                    event,
+                    say,
+                    thread_ts=thread_ts,
+                    option=fe_quiz_option,
+                )
+                _mark_event_processed(state, event)
+                return
             _run_rag_if_allowed(
                 rag,
                 content_filter,
@@ -460,19 +466,6 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
 
         if ch_type != "im":
-            # #region agent log
-            _agent_debug(
-                "C",
-                "slack_app.py:on_message",
-                "ignored: channel message without mention",
-                {
-                    "channel_type": ch_type,
-                    "in_thread": in_thread,
-                    "bot_active": bot_active,
-                    "text_preview": text[:80],
-                },
-            )
-            # #endregion
             return
 
         if not text:
@@ -480,17 +473,13 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if wants_format_test(text):
             _post_format_test(say)
             return
+        fe_quiz_option = parse_fe_quiz_command(text)
+        if fe_quiz_option is not None:
+            _post_quiz(state, event, say, thread_ts=None, option=fe_quiz_option)
+            return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=None)
             return
-        # #region agent log
-        _agent_debug(
-            "B",
-            "slack_app.py:on_message",
-            "DM RAG path",
-            {"text_preview": text[:80]},
-        )
-        # #endregion
         _run_rag_if_allowed(
             rag,
             content_filter,
@@ -515,22 +504,6 @@ def run() -> None:
 
     logging.basicConfig(level=logging.INFO)
     settings = Settings.load()
-    # #region agent log
-    from febot.config import _aws_credentials_available
-
-    _agent_debug(
-        "A",
-        "slack_app.py:run",
-        "startup rag config",
-        {
-            "use_bedrock": settings.use_bedrock,
-            "ai_api_key_set": bool(settings.ai_api_key),
-            "aws_creds": _aws_credentials_available(),
-            "rag_enabled": settings.rag_enabled(),
-            "rag_engine_will_init": settings.rag_enabled(),
-        },
-    )
-    # #endregion
     if settings.rag_enabled():
         if settings.use_supabase:
             log.info("Using Supabase for vector search (Chroma startup check skipped)")

@@ -11,7 +11,7 @@
 ## 機能要件
 
 - 用語解説機能（ベクトル DB RAG。未ヒット時は Web 検索フォールバック）
-- 練習問題の出題（データ未設定時は「練習問題データが見つかりません」）
+- 練習問題の出題（IPA 公式過去問を Supabase `quiz_*` テーブルから。未 ingest 時は起動エラー）
 - 問題解説機能（スレッドで正誤と解説を返す。同一スレッド内の会話履歴をプロセス稼働中に保持）
 - ベクトル DB に該当がない質問は **DuckDuckGo 検索 → LLM で要約**（`data/corpus/` へのローカル保存はしない。Supabase / Chroma への追記のみ）
 - **コンテンツフィルター機能**（LLM を使って質問が IT・プログラミング関連かを判定し、無関係な質問をフィルタリング）
@@ -77,6 +77,8 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    **任意（パス・検索チューニング）**
 
    - `CHROMA_PATH` … 既定 `./data/chroma`（`febot_corpus` コレクションが存在すること）
+   - `CORPUS_DIR` … 既定 `./data/corpus`（レガシー参照用。RAG 本体は Chroma / Supabase）
+   - `QUIZ_DIR` … 既定 `./data/quiz`（ローカル sample 用。本番出題は Supabase `quiz_*`）
    - `RAG_TOP_K` … 参照チャンク数（既定 `5`）
    - `RAG_MAX_DISTANCE` … Chroma コサイン距離の上限（既定 `0.52`。`off` / `none` で無効化）
    - `RAG_POOL_MULT` … 距離フィルタ前に読む候補の倍率（既定 `5`）
@@ -86,7 +88,8 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
    - `THREAD_HISTORY_MAX_TURNS` … スレッドあたりの会話履歴保持件数（既定 `10`。ボット再起動で消える）
    - `THREAD_MAX_SESSIONS` … インメモリで保持するスレッドセッション数の上限（既定 `500`）
    - `BEDROCK_CHAT_SKIP_CONVERSE` … `true` のときチャットは `InvokeModel` のみ（`Converse` を試さない。既定 `false`）
-   - `SUPABASE_URL` / `SUPABASE_KEY` … 設定時は Chroma の代わりに Supabase でベクトル検索（起動時の Chroma チェックはスキップ）
+   - `SUPABASE_URL` / `SUPABASE_KEY` … **必須**（練習問題出題）。設定時は Chroma の代わりに Supabase でベクトル検索も可能（起動時の Chroma チェックはスキップ）
+   - `SUPABASE_SERVICE_KEY` … ingest CLI 用（`scripts/ipa_ingest_quiz.py`）。`.env` のみ
 
    最小例（Bedrock チャット＋OpenAI 埋め込み。本番は IAM ロール推奨）:
 
@@ -107,7 +110,19 @@ OpenAI 互換 API からの移行手順・ベクトル次元の注意は [docs/2
 
 3. RAG を使う場合は、AWS＋Bedrock チャット用設定に加え `AI_API_KEY`、または OpenAI 互換のみなら `AI_API_KEY` が揃っていること。あわせて **Chroma（`CHROMA_PATH` に `febot_corpus` コレクション）または Supabase にベクトルデータが投入済み**であること。新規環境では [docs/20260520-remove-local-corpus.md](docs/20260520-remove-local-corpus.md) を参照。
 
-4. ボットを起動する。
+4. **練習問題（IPA 過去問）** を Supabase に投入する（初回・新試験追加時）。
+
+   ```bash
+   # Supabase で supabase/migrations/20260609_quiz_tables.sql を適用後
+   python3 -m pip install -e ".[ingest]"
+   python3 scripts/ipa_ingest_quiz.py ingest --all
+   ```
+
+   LLM 補正（`--skip-repair` 未指定時）は **OpenAI 互換 API 固定**（`AI_API_KEY` / `AI_CHAT_MODEL`）。RAG チャットが Bedrock でも ingest 補正は Bedrock を使わない。
+
+   詳細: [docs/20260609-ipa-quiz-supabase.md](docs/20260609-ipa-quiz-supabase.md)
+
+5. ボットを起動する。
 
    ```bash
    python3 -m febot
@@ -139,7 +154,7 @@ PR がマージ可能になるには、GitHub Actions（`.github/workflows/ci-cd
 **推奨（コミット・PR 前）:** `scripts/ci_local.py --fix` で Ruff の自動整形・安全な Lint 修正を行ったうえで、CI と同じ検証を一括実行する。`ruff format --check` だけを手動で回すと未整形のまま失敗しやすいため、先に `ruff format`（`--check` なし）を通すか、このスクリプトを使う。
 
 ```bash
-python3 -m pip install -e ".[dev]"
+python3 -m pip install -e ".[dev,ingest]"
 python3 scripts/ci_local.py --fix
 ```
 
@@ -160,9 +175,14 @@ python3 scripts/ci_local.py --fix
 
 ## 実行時の挙動（要約）
 
-- **チャンネル**: ボットに **メンション**して質問。キーワード「過去問」「出題」「練習問題」で `sample-questions.md` から問題を出題し、**選択肢ボタン**またはスレッドへの「ア」「イ」「ウ」「エ」返信で正誤と解説を返す。
+- **チャンネル**: ボットに **メンション**して質問。キーワード「過去問」「出題」「練習問題」で Supabase の IPA 過去問を出題し、**選択肢ボタン**（科目B はア〜ク等多肢）またはスレッドへの選択肢マーク返信で正誤と解説を返す。図表付き問題は Slack 上に画像ブロックを表示。
 - **スレッド追質問**: ボットが一度応答したスレッドでは、メンションなしで追質問できる（会話履歴はプロセス稼働中のみ。再起動でリセット）。
 - **DM**: メンション不要。上記キーワードと RAG 質問が同様に使える。
+- **`/fe-quiz`**: スラッシュコマンド（または `@ボット /fe-quiz …` メンション）で Supabase から問題を出題。引数なしで全問ランダム。オプション例:
+  - `/fe-quiz 科目A` または `/fe-quiz a` → 科目A（知識問題）から出題
+  - `/fe-quiz 科目B` または `/fe-quiz b` → 科目B（アルゴリズム）から出題
+  - `/fe-quiz ネットワーク` など → 分野・タグで絞り込み
+  - 出題は Block Kit（長文対応・多肢は actions ボタン・図表は image ブロック）。科目B の擬似言語「共通仕様」は出題文に含めない
 - **RAG**: Chroma または Supabase で類似チャンクを取得（`RAG_MAX_DISTANCE` で距離フィルタ）。LLM が「参照抜粋にない」と判断した場合や、検索ヒットが無い場合は **Web 検索フォールバック**に進む。Web 検索で得た内容は **Supabase / Chroma にのみ** 追記し、`data/corpus/` には保存しない。
 
 ## Slack アプリ側（概要）
@@ -172,7 +192,7 @@ python3 scripts/ci_local.py --fix
 - **プライベートチャンネル**でもスレッド追質問・採点を使う場合: `groups:history` と Event `message.groups` を追加
 - **Event Subscriptions**（必須）: `app_mention`, `message.channels`（スレッド追質問・練習問題の解答）, `message.im`
 - **Interactivity**（必須）: 練習問題の選択肢ボタン用。Socket Mode 利用時は Socket Mode 経由で受信
-- **Slash Commands**: `/fe-help`, `/fe-format-test`（Block Kit 表示の目視テスト用。AI・RAG 不要）
+- **Slash Commands**: `/fe-help`, `/fe-quiz`, `/fe-format-test`（`/fe-format-test` は Block Kit 表示の目視テスト用。AI・RAG 不要）
 
 ### デプロイ後チェックリスト
 

@@ -96,3 +96,8 @@ def get_llm_backend(settings: Settings) -> ChatEmbedBackend:
     if settings.use_bedrock:
         return BedrockChatOpenAIEmbedBackend(settings)
     return OpenAICompatBackend(settings)
+
+
+def get_openai_compat_backend(settings: Settings) -> OpenAICompatBackend:
+    """OpenAI-compatible chat only (ignores USE_BEDROCK / Bedrock chat settings)."""
+    return OpenAICompatBackend(settings)
