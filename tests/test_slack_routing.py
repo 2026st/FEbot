@@ -3,7 +3,8 @@
 from febot.quiz import QuizItem
 from febot.slack_handlers import (
     ProcessedEvents,
-    parse_fe_quiz_command,
+    is_tips_message,
+    parse_slash_command,
     session_key,
     text_mentions_bot,
     try_handle_quiz_reply,
@@ -65,9 +66,19 @@ def test_text_mentions_bot() -> None:
     assert text_mentions_bot("hi", None) is False
 
 
-def test_parse_fe_quiz_command() -> None:
-    assert parse_fe_quiz_command("/fe-quiz") == ""
-    assert parse_fe_quiz_command("/fe-quiz 科目B") == "科目B"
-    assert parse_fe_quiz_command("/FE-QUIZ a") == "a"
-    assert parse_fe_quiz_command("過去問") is None
-    assert parse_fe_quiz_command("/fe-help") is None
+def test_parse_slash_command_quiz() -> None:
+    assert parse_slash_command("/fe-quiz") == ("fe-quiz", "")
+    assert parse_slash_command("/fe-quiz 科目B") == ("fe-quiz", "科目B")
+    assert parse_slash_command("/FE-QUIZ a") == ("fe-quiz", "a")
+    assert parse_slash_command("過去問") is None
+    assert parse_slash_command("/fe-help") == ("fe-help", "")
+
+
+def test_is_tips_message() -> None:
+    assert is_tips_message("/tips") is True
+    assert is_tips_message("/tips 補足説明") is True
+    assert is_tips_message("/TIPS 補足") is True
+    assert is_tips_message("  /tips  補足  ") is True
+    assert is_tips_message("/tipsfoo") is False
+    assert is_tips_message("/fe-help") is False
+    assert is_tips_message("通常の質問") is False
