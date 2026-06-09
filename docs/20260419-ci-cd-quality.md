@@ -23,7 +23,7 @@
 CI の `lint` ジョブと `pytest` をまとめて再現するスクリプトを用意している。
 
 ```bash
-python3 -m pip install -e ".[dev]"
+python3 -m pip install -e ".[dev,ingest]"
 python3 scripts/ci_local.py --fix
 ```
 

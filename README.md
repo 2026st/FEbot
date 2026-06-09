@@ -154,7 +154,7 @@ PR がマージ可能になるには、GitHub Actions（`.github/workflows/ci-cd
 **推奨（コミット・PR 前）:** `scripts/ci_local.py --fix` で Ruff の自動整形・安全な Lint 修正を行ったうえで、CI と同じ検証を一括実行する。`ruff format --check` だけを手動で回すと未整形のまま失敗しやすいため、先に `ruff format`（`--check` なし）を通すか、このスクリプトを使う。
 
 ```bash
-python3 -m pip install -e ".[dev]"
+python3 -m pip install -e ".[dev,ingest]"
 python3 scripts/ci_local.py --fix
 ```
 
