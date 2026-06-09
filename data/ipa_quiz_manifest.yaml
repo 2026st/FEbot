@@ -1,0 +1,45 @@
+# IPA FE CBT past exams for quiz ingest (scripts/ipa_ingest_quiz.py)
+# Add new entries when IPA publishes additional exams.
+
+exams:
+  - exam_id: "2023r05"
+    kamoku: "A"
+    exam_format: "cbt"
+    source_page_url: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/2023r05.html"
+    pdf_qs: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/t6hhco0000003zx0-att/2023r05_fe_kamoku_a_qs.pdf"
+    pdf_ans: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/t6hhco0000003zx0-att/2023r05_fe_kamoku_a_ans.pdf"
+
+  - exam_id: "2023r05"
+    kamoku: "B"
+    exam_format: "cbt"
+    source_page_url: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/2023r05.html"
+    pdf_qs: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/t6hhco0000003zx0-att/2023r05_fe_kamoku_b_qs.pdf"
+    pdf_ans: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/t6hhco0000003zx0-att/2023r05_fe_kamoku_b_ans.pdf"
+
+  - exam_id: "2024r06"
+    kamoku: "A"
+    exam_format: "cbt"
+    source_page_url: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/2024r06.html"
+    pdf_qs: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/eid2eo0000007g1d-att/2024r06_fe_kamoku_a_qs.pdf"
+    pdf_ans: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/eid2eo0000007g1d-att/2024r06_fe_kamoku_a_ans.pdf"
+
+  - exam_id: "2024r06"
+    kamoku: "B"
+    exam_format: "cbt"
+    source_page_url: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/2024r06.html"
+    pdf_qs: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/eid2eo0000007g1d-att/2024r06_fe_kamoku_b_qs.pdf"
+    pdf_ans: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/eid2eo0000007g1d-att/2024r06_fe_kamoku_b_ans.pdf"
+
+  - exam_id: "2025r07"
+    kamoku: "A"
+    exam_format: "cbt"
+    source_page_url: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/2025r07.html"
+    pdf_qs: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/tbl5kb0000005r9r-att/2025r07_fe_kamoku_a_qs.pdf"
+    pdf_ans: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/tbl5kb0000005r9r-att/2025r07_fe_kamoku_a_ans.pdf"
+
+  - exam_id: "2025r07"
+    kamoku: "B"
+    exam_format: "cbt"
+    source_page_url: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/2025r07.html"
+    pdf_qs: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/tbl5kb0000005r9r-att/2025r07_fe_kamoku_b_qs.pdf"
+    pdf_ans: "https://www.ipa.go.jp/shiken/mondai-kaiotu/sg_fe/koukai/tbl5kb0000005r9r-att/2025r07_fe_kamoku_b_ans.pdf"
