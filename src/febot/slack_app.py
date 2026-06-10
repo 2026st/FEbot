@@ -1,4 +1,4 @@
-"""Slack Bolt app: Socket Mode, mentions, DM, quiz threads, /fe-help, /fe-format-test."""
+"""Slack Bolt app: Socket Mode, mentions, DM, quiz threads, message slash commands."""
 
 from __future__ import annotations
 
@@ -35,11 +35,12 @@ from febot.slack_handlers import (
     build_quiz_message,
     format_quiz_history,
     handle_quiz_button,
-    parse_fe_quiz_command,
+    is_tips_message,
     quiz_filter_miss_message,
     session_key,
     text_mentions_bot,
     try_handle_quiz_reply,
+    try_handle_slash_command,
 )
 from febot.supabase_quiz import SupabaseQuizStore
 from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_from_event
@@ -70,15 +71,17 @@ def _help_text(settings: Settings) -> str:
         "• DM でも同じように送れます\n"
         "• 「過去問」「出題」「練習問題」と書くと *IPA公式過去問* を出します（多肢対応・図表付き・選択肢ボタン）\n"
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
+        "• ヘルプ: チャンネルでは `@ボット /fe-help`、スレッド内・DM では `/fe-help`\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
         "• 過去問は IPA 公表 PDF 由来（Supabase 保存）。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
-        "\n*スラッシュコマンド*\n"
+        "\n*コマンド*（チャンネルは @ボット と併用、スレッド内・DM は `/` のみ）\n"
+        "• `/fe-help` — このヘルプ\n"
         "• `/fe-quiz` — 全問からランダム出題\n"
         "• `/fe-quiz 科目A` または `/fe-quiz a` — 科目A（知識問題）から出題\n"
         "• `/fe-quiz 科目B` または `/fe-quiz b` — 科目B（アルゴリズム）から出題\n"
         "• `/fe-quiz ネットワーク` など — 分野名で絞り込み出題\n"
         "  （分野例: OS、ネットワーク、データベース、セキュリティ、アルゴリズム、表計算）\n"
-        "• *表示確認*: `/fe-format-test` またはメンション/DM で `フォーマットテスト` / `表示テスト`（AI 不要）\n"
+        "• `/fe-format-test` または `フォーマットテスト` / `表示テスト`（AI 不要・表示確認）\n"
     )
     if not settings.rag_enabled():
         return base + (
@@ -130,13 +133,30 @@ def _post_format_test(say, **kwargs) -> None:
     _say_formatted(say, format_test_sample_body(), footer=FORMAT_TEST_FOOTER, **kwargs)
 
 
-def _respond_format_test(respond) -> None:
-    body = format_test_sample_body()
-    fallback, blocks = build_slack_blocks(body, footer=FORMAT_TEST_FOOTER)
-    if blocks:
-        respond(text=fallback, blocks=blocks)
-    else:
-        respond(fallback)
+def _try_slash_commands(
+    state: BotState,
+    event: dict,
+    text: str,
+    say,
+    thread_ts: str | None,
+    settings: Settings,
+) -> bool:
+    kwargs = {"thread_ts": thread_ts} if thread_ts else {}
+
+    def handle_quiz(args: str) -> None:
+        _post_quiz(state, event, say, thread_ts=thread_ts, option=args)
+
+    def handle_format_test() -> None:
+        _post_format_test(say, **kwargs)
+
+    return try_handle_slash_command(
+        text,
+        help_text=_help_text(settings),
+        say=say,
+        handle_quiz=handle_quiz,
+        handle_format_test=handle_format_test,
+        thread_ts=thread_ts,
+    )
 
 
 def _say_formatted(
@@ -330,43 +350,6 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
     except Exception as e:
         log.warning("auth.test failed (mention dedupe disabled): %s", e)
 
-    @app.command("/fe-help")
-    def fe_help(ack, respond):
-        ack()
-        respond(_help_text(settings))
-
-    @app.command("/fe-quiz")
-    def fe_quiz_cmd(ack, command, client, respond, logger):
-        ack()
-        option = (command.get("text") or "").strip()
-        item = pick_filtered(state.quiz_items, option)
-        if not item:
-            respond(
-                quiz_filter_miss_message(option) if option else "練習問題データが見つかりません。"
-            )
-            return
-        channel_id = command["channel_id"]
-        fallback, blocks = build_quiz_message(item)
-        try:
-            result = client.chat_postMessage(
-                channel=channel_id,
-                text=fallback,
-                blocks=blocks,
-            )
-            ts = result.get("ts")
-            if ts:
-                key = thread_key(channel_id, ts)
-                state.sessions.set_quiz(key, item)
-                state.sessions.append_assistant(key, format_quiz_history(item))
-        except Exception as e:
-            logger.exception("fe_quiz_cmd chat_postMessage failed: %s", e)
-            respond("問題の投稿中にエラーが発生しました。")
-
-    @app.command("/fe-format-test")
-    def fe_format_test(ack, respond):
-        ack()
-        _respond_format_test(respond)
-
     @app.action({"action_id": re.compile(r"^quiz_answer_")})
     def on_quiz_answer(ack, body, say):
         ack()
@@ -380,14 +363,12 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if not text:
             say("メッセージを入力してください。", thread_ts=reply_ts)
             return
+        if _try_slash_commands(state, event, text, say, reply_ts, settings):
+            return
         if event.get("thread_ts") and try_handle_quiz_reply(state.sessions, event, text, say):
             return
         if wants_format_test(text):
             _post_format_test(say, thread_ts=reply_ts)
-            return
-        fe_quiz_option = parse_fe_quiz_command(text)
-        if fe_quiz_option is not None:
-            _post_quiz(state, event, say, thread_ts=reply_ts, option=fe_quiz_option)
             return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
@@ -428,6 +409,10 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if text_mentions_bot(text, state.bot_user_id):
             return
 
+        if thread_ts and is_tips_message(text):
+            _mark_event_processed(state, event)
+            return
+
         if thread_ts and try_handle_quiz_reply(state.sessions, event, text, say):
             _mark_event_processed(state, event)
             return
@@ -439,15 +424,15 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if in_thread and bot_active:
             if not text:
                 return
-            fe_quiz_option = parse_fe_quiz_command(text)
-            if fe_quiz_option is not None:
-                _post_quiz(
-                    state,
-                    event,
-                    say,
-                    thread_ts=thread_ts,
-                    option=fe_quiz_option,
-                )
+            if _try_slash_commands(state, event, text, say, thread_ts, settings):
+                _mark_event_processed(state, event)
+                return
+            if wants_format_test(text):
+                _post_format_test(say, thread_ts=thread_ts)
+                _mark_event_processed(state, event)
+                return
+            if _wants_quiz(text):
+                _post_quiz(state, event, say, thread_ts=thread_ts)
                 _mark_event_processed(state, event)
                 return
             _run_rag_if_allowed(
@@ -470,12 +455,10 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
 
         if not text:
             return
+        if _try_slash_commands(state, event, text, say, None, settings):
+            return
         if wants_format_test(text):
             _post_format_test(say)
-            return
-        fe_quiz_option = parse_fe_quiz_command(text)
-        if fe_quiz_option is not None:
-            _post_quiz(state, event, say, thread_ts=None, option=fe_quiz_option)
             return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=None)

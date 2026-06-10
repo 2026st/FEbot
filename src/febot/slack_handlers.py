@@ -25,7 +25,11 @@ from febot.thread_session import ThreadSessionStore, thread_key, thread_root_ts_
 
 _PROCESSED_EVENT_TTL_SEC = 5.0
 _PROCESSED_EVENT_MAX = 100
-_FE_QUIZ_CMD_RE = re.compile(r"^/fe-quiz(?:\s+(.*))?\s*$", re.IGNORECASE)
+_SLASH_CMD_RE = re.compile(r"^/(fe-[a-z-]+)(?:\s+(.*))?\s*$", re.IGNORECASE)
+_TIPS_PREFIX_RE = re.compile(r"^/tips(?:\s+.*)?$", re.IGNORECASE)
+KNOWN_SLASH_COMMANDS = frozenset({"fe-help", "fe-quiz", "fe-format-test"})
+_SLASH_USAGE = "コマンド形式: `/fe-help`, `/fe-quiz`, `/fe-format-test`"
+_UNKNOWN_SLASH_TEMPLATE = "不明なコマンド: /{name}。利用可能: /fe-help, /fe-quiz, /fe-format-test"
 _COMPACT_CHOICE_THRESHOLD = 6
 
 
@@ -54,12 +58,17 @@ def _valid_image_urls(urls: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(u for u in urls if u and _image_url_reachable(u))
 
 
-def parse_fe_quiz_command(text: str) -> str | None:
-    """Return filter option when *text* is a ``/fe-quiz`` command, else ``None``."""
-    m = _FE_QUIZ_CMD_RE.match(text.strip())
+def parse_slash_command(text: str) -> tuple[str, str] | None:
+    """Return ``(command_name, args)`` for ``/fe-*`` messages, else ``None``."""
+    m = _SLASH_CMD_RE.match(text.strip())
     if not m:
         return None
-    return (m.group(1) or "").strip()
+    return m.group(1).lower(), (m.group(2) or "").strip()
+
+
+def is_tips_message(text: str) -> bool:
+    """Return True when *text* is a thread ``/tips`` marker (bot should ignore)."""
+    return bool(_TIPS_PREFIX_RE.match(text.strip()))
 
 
 def quiz_filter_miss_message(option: str) -> str:
@@ -108,6 +117,45 @@ class ProcessedEvents:
             self._seen.popitem(last=False)
 
 
+def try_handle_slash_command(
+    text: str,
+    *,
+    help_text: str,
+    say,
+    handle_quiz,
+    handle_format_test,
+    thread_ts: str | None = None,
+) -> bool:
+    """Handle ``/fe-*`` message commands. Returns True if handled."""
+    stripped = text.strip()
+    if stripped == "/":
+        kwargs = {"thread_ts": thread_ts} if thread_ts else {}
+        say(_SLASH_USAGE, **kwargs)
+        return True
+
+    parsed = parse_slash_command(text)
+    if parsed is None:
+        return False
+
+    name, args = parsed
+    if name not in KNOWN_SLASH_COMMANDS:
+        kwargs = {"thread_ts": thread_ts} if thread_ts else {}
+        say(_UNKNOWN_SLASH_TEMPLATE.format(name=name), **kwargs)
+        return True
+
+    if name == "fe-help":
+        kwargs = {"thread_ts": thread_ts} if thread_ts else {}
+        say(help_text, **kwargs)
+        return True
+    if name == "fe-quiz":
+        handle_quiz(args)
+        return True
+    if name == "fe-format-test":
+        handle_format_test()
+        return True
+    return False
+
+
 def session_key(event: dict) -> str:
     return thread_key(event["channel"], thread_root_ts_from_event(event))
 
@@ -140,7 +188,8 @@ def _quiz_display_body(item: QuizItem, image_urls: tuple[str, ...]) -> str:
 
 
 def format_quiz_history(item: QuizItem) -> str:
-    body_line = _quiz_display_body(item)
+    image_urls = _valid_image_urls(item.image_urls)
+    body_line = _quiz_display_body(item, image_urls)
     lines = [
         f"【練習問題】`{item.qid}` ({item.qtype})",
         body_line,
