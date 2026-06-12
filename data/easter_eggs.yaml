@@ -1,0 +1,69 @@
+rules:
+  - id: greeting
+    type: simple
+    match_type: partial
+    keywords: ["こんにちは", "おはよう", "こんばんは"]
+    responses:
+      - "こんにちは！今日も一緒に勉強頑張りましょう📚"
+      - "おはようございます！良い一日になりますように☀️"
+      - "こんばんは！夜の勉強も応援していますよ🌙"
+
+  - id: thanks
+    type: simple
+    match_type: partial
+    keywords: ["ありがとう", "ありがとうございます", "サンクス", "助かった", "感謝"]
+    responses:
+      - "どういたしまして！また困ったことがあれば気軽に聞いてくださいね😊"
+      - "お役に立てて嬉しいです！一緒にFE合格目指しましょう🎯"
+      - "いえいえ！勉強頑張ってください💪"
+
+  - id: otsukare
+    type: simple
+    match_type: partial
+    keywords: ["おつかれ", "お疲れ様"]
+    responses:
+      - "お疲れ様です！今日もよく頑張りましたね✨"
+      - "お疲れ様でした！しっかり休んでくださいね😌"
+
+  - id: werewolf
+    type: simple
+    match_type: exact
+    keywords: ["人狼は誰？", "人狼はだれ？"]
+    responses:
+      - "村人（正常なコード）に紛れ込んだ人狼（バグ）ですね…！とりあえずエラーログから疑ってみましょう🐺"
+
+  - id: minecraft
+    type: simple
+    match_type: partial
+    keywords: ["マイクラ", "マインクラフト"]
+    responses:
+      - "今日はFEの勉強を一旦セーブして、ダイヤを掘りに行きますか？⛏️ まずは現実のタスクというクリーパーから逃げましょう！"
+
+  - id: notfound
+    type: simple
+    match_type: partial
+    keywords: ["404"]
+    responses:
+      - "Not Found. あなたのやる気が見つかりません……なんて言わずに、あと1問だけ解いてみませんか？"
+
+  - id: tired
+    type: simple
+    match_type: partial
+    keywords: ["疲れた", "つかれた"]
+    responses:
+      - "お疲れ様です！CPUも人間も、熱を持ちすぎると性能が落ちてしまいます。一旦コーヒーブレイクにして、メモリを解放しましょう☕"
+
+  - id: fortune
+    type: random
+    match_type: partial
+    keywords: ["運勢", "今日の運勢"]
+    responses:
+      - "今日のデバッグ運は絶好調！一発でバグが見つかるかも🔍"
+      - "今日のコンパイル運は…ちょっと雲行きが怪しいです。こまめに保存しましょう💾"
+      - "今日はGitコマンドがサクサク決まる日！コンフリクト知らずです🚀"
+
+  - id: mbti_start
+    type: mbti
+    match_type: partial
+    keywords: ["診断スタート", "性格診断"]
+    responses: []
