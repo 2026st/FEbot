@@ -49,6 +49,24 @@ log = logging.getLogger(__name__)
 
 QUIZ_KEYWORDS = ("過去問", "出題", "練習問題")
 
+DEVELOPER_NAMES = (
+    "田中洸志",
+    "須田大翔",
+    "善治雅人",
+    "岩田怜雄",
+    "山村祐人",
+    "奥津泰成",
+    "市川栞",
+)
+
+# メンション/DM 本文を casefold() + 空白除去したキーで照合（大文字小文字・空白の有無は区別しない）
+_EASTER_EGG_REPLIES: dict[str, str] = {
+    "hey!siri": "面白い冗談ですね。私はSiriではありません。",
+    "ok,google": "どうやら違うアシスタントと間違えていらっしゃるようです",
+    '"w草w"': "笑ってるね？その心笑ってるね？",
+    "鴨うまそうっすね": "おい笑える",
+}
+
 _THINKING_MESSAGES = [
     "🤔 thinking...",
     "🔍 ナレッジベースを検索中...",
@@ -71,6 +89,12 @@ def _help_text(settings: Settings) -> str:
         "• DM でも同じように送れます\n"
         "• 「過去問」「出題」「練習問題」と書くと *IPA公式過去問* を出します（多肢対応・図表付き・選択肢ボタン）\n"
         "• ボットが応答したスレッドでは、追質問をメンションなしで送れます（会話履歴はプロセス稼働中のみ保持）\n"
+        "• 小ネタ（@ボット にメンション、または DM。英字は大文字小文字を区別しない）:\n"
+        "  - `$name` … 開発者一覧\n"
+        "  - `Hey!siri` … Siri ネタ\n"
+        "  - `OK,Google` … Google アシスタントネタ\n"
+        '  - `"w草w"` … 草ネタ\n'
+        "  - `鴨うまそうっすね` … 鴨ネタ\n"
         "• ヘルプ: チャンネルでは `@ボット /fe-help`、スレッド内・DM では `/fe-help`\n"
         "• 回答は登録コーパスに基づく生成です。*誤りや不足があり得ます*。必ず公式教材で確認してください。\n"
         "• 過去問は IPA 公表 PDF 由来（Supabase 保存）。利用上の留意点: https://www.ipa.go.jp/shiken/faq.html#seido\n"
@@ -107,6 +131,19 @@ def _strip_mentions(text: str) -> str:
 
 def _wants_quiz(text: str) -> bool:
     return any(k in text for k in QUIZ_KEYWORDS)
+
+
+def _format_developer_names() -> str:
+    lines = "\n".join(f"• {name}" for name in DEVELOPER_NAMES)
+    return f"*開発者*\n{lines}"
+
+
+def _easter_egg_reply(text: str) -> str | None:
+    """固定フレーズの小ネタ応答。該当しなければ None。"""
+    key = re.sub(r"\s+", "", text.casefold())
+    if key == "$name":
+        return _format_developer_names()
+    return _EASTER_EGG_REPLIES.get(key)
 
 
 def _make_cache_filename(question: str) -> str:
@@ -370,6 +407,10 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         if wants_format_test(text):
             _post_format_test(say, thread_ts=reply_ts)
             return
+        egg = _easter_egg_reply(text)
+        if egg is not None:
+            say(egg, thread_ts=event.get("thread_ts", event["ts"]))
+            return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
             return
@@ -459,6 +500,10 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
         if wants_format_test(text):
             _post_format_test(say)
+            return
+        egg = _easter_egg_reply(text)
+        if egg is not None:
+            say(egg)
             return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=None)
