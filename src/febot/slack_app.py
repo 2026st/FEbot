@@ -56,9 +56,10 @@ DEVELOPER_NAMES = (
     "岩田怜雄",
     "山村祐人",
     "奥津泰成",
+    "市川栞",
 )
 
-# メンション/DM 本文を strip().casefold() したキーで照合（大文字小文字は区別しない）
+# メンション/DM 本文を casefold() + 空白除去したキーで照合（大文字小文字・空白の有無は区別しない）
 _EASTER_EGG_REPLIES: dict[str, str] = {
     "hey!siri": "面白い冗談ですね。私はSiriではありません。",
     "ok,google": "どうやら違うアシスタントと間違えていらっしゃるようです",
@@ -139,7 +140,7 @@ def _format_developer_names() -> str:
 
 def _easter_egg_reply(text: str) -> str | None:
     """固定フレーズの小ネタ応答。該当しなければ None。"""
-    key = text.strip().casefold()
+    key = re.sub(r"\s+", "", text.casefold())
     if key == "$name":
         return _format_developer_names()
     return _EASTER_EGG_REPLIES.get(key)
