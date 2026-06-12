@@ -16,6 +16,7 @@ from febot import web_search as ws
 from febot.bedrock_errors import slack_reply_for_bedrock_access_error
 from febot.config import Settings
 from febot.content_filter import ContentFilter
+from febot.easter_eggs import EasterEggHandler, handle_mbti_action
 from febot.quiz import (
     QuizItem,
     load_quiz_items_from_supabase,
@@ -341,6 +342,7 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
         ContentFilter(settings) if settings.rag_enabled() else None
     )
     state = BotState(quiz_items=_load_quiz_for_bot(settings))
+    easter_eggs = EasterEggHandler()
 
     app = App(token=settings.slack_token)
     try:
@@ -354,6 +356,11 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
     def on_quiz_answer(ack, body, say):
         ack()
         handle_quiz_button(state.sessions, body, say)
+
+    @app.action({"action_id": re.compile(r"^mbti_")})
+    def on_mbti_action(ack, body, client):
+        ack()
+        handle_mbti_action(body["actions"][0]["action_id"], body, client)
 
     @app.event("app_mention")
     def on_mention(event, say, logger):
@@ -372,6 +379,8 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=reply_ts)
+            return
+        if easter_eggs.try_handle(text, say, thread_ts=reply_ts):
             return
         _run_rag_if_allowed(
             rag,
@@ -435,6 +444,9 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
                 _post_quiz(state, event, say, thread_ts=thread_ts)
                 _mark_event_processed(state, event)
                 return
+            if easter_eggs.try_handle(text, say, thread_ts=thread_ts):
+                _mark_event_processed(state, event)
+                return
             _run_rag_if_allowed(
                 rag,
                 content_filter,
@@ -462,6 +474,8 @@ def create_app(settings: Settings) -> tuple[App, BotState]:
             return
         if _wants_quiz(text):
             _post_quiz(state, event, say, thread_ts=None)
+            return
+        if easter_eggs.try_handle(text, say, thread_ts=None):
             return
         _run_rag_if_allowed(
             rag,
